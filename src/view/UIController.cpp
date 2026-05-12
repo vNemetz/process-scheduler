@@ -73,7 +73,7 @@ void UIController::drawLine(sf::RenderTarget& target, const view::PlotArea& p,
 }
 
 UIController::UIController()
-    : window(sf::VideoMode(1200, 600), "Simulador SO - UI"),
+    : window(sf::VideoMode(1200, 600), "Task Scheduler Simulator"),
       plot{{80.f, 60.f, 1000.f, 460.f}, -10.f, 10.f, -2.f, 2.f} {
     window.setFramerateLimit(60);
     buildDemoData();
