@@ -3,8 +3,8 @@
 #include <cmath>
 
 namespace view{
-namespace{
-sf::Vector2f mapToScreen(float x, float y, const view::PlotArea& p) {
+
+sf::Vector2f UIController::mapToScreen(float x, float y, const view::PlotArea& p) {
     float nx = (x - p.xmin) / (p.xmax - p.xmin);
     float ny = (y - p.ymin) / (p.ymax - p.ymin);
     return {
@@ -13,7 +13,7 @@ sf::Vector2f mapToScreen(float x, float y, const view::PlotArea& p) {
     };
 }
 
-void drawGrid(sf::RenderTarget& target, const view::PlotArea& p, int xTicks, int yTicks) {
+void UIController::drawGrid(sf::RenderTarget& target, const view::PlotArea& p, int xTicks, int yTicks) {
     sf::VertexArray grid(sf::Lines);
 
     for (int i = 0; i <= xTicks; ++i) {
@@ -33,7 +33,7 @@ void drawGrid(sf::RenderTarget& target, const view::PlotArea& p, int xTicks, int
     target.draw(grid);
 }
 
-void drawAxes(sf::RenderTarget& target, const view::PlotArea& p) {
+void UIController::drawAxes(sf::RenderTarget& target, const view::PlotArea& p) {
     sf::VertexArray axes(sf::Lines, 4);
 
     float x0 = (0.0f >= p.xmin && 0.0f <= p.xmax)
@@ -58,8 +58,8 @@ void drawAxes(sf::RenderTarget& target, const view::PlotArea& p) {
     target.draw(border);
 }
 
-void drawLine(sf::RenderTarget& target, const view::PlotArea& p,
-              const std::vector<sf::Vector2f>& data) {
+void UIController::drawLine(sf::RenderTarget& target, const view::PlotArea& p,
+        const std::vector<sf::Vector2f>& data) {
     if (data.empty()) {
         return;
     }
@@ -69,7 +69,7 @@ void drawLine(sf::RenderTarget& target, const view::PlotArea& p,
         line[i] = sf::Vertex(pt, sf::Color(100, 200, 250));
     }
     target.draw(line);
-}
+
 }
 
 UIController::UIController()
