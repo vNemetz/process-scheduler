@@ -1,129 +1,157 @@
-/*
-#include <view/UIController.hpp>
-#include <iostream>
-
-
-#include "core/Clock.hpp"
-#include "core/CPU.hpp"
-
-int main() {
-    std::cout << "[INFO] Starting task scheduler...\n";
-    view::UIController ui;
-    ui.execute();
-    std::cout << "[INFO] Task scheduler was finished.\n";
-    return 0;
-}
-*/
-
-
 // ============================================================================
-// main.cpp — TESTE DE VALIDACAO
+// main.cpp — Ponto de entrada do Simulador de SO Multitarefa
 // ============================================================================
-// Este main eh TEMPORARIO. Serve para validar que tudo que construimos
-// ate agora funciona conjuntamente:
-//   - Clock avanca
-//   - CPU armazena/exibe estado
-//   - ConfigParser le um arquivo .cfg e produz Tasks
+// O main eh propositalmente CURTO. Ele orquestra os componentes, mas nao
+// contem logica de negocio. Tudo de "interessante" esta nas classes.
 //
-// Sem janela SFML ainda, so terminal. Depois disso, voltamos pro main
-// "de verdade" que abre a janela.
+// Fluxo:
+//   1. Le argumentos da linha de comando (path do .cfg, modo headless)
+//   2. Parser le e valida o .cfg
+//   3. Cria o Simulator com FIFOScheduler provisorio
+//   4. Executa a simulacao (tick a tick, com log no terminal)
+//   5. Mostra Gantt ASCII final + relatorio
+//   6. (Se nao for headless) abre janela SFML com info do resultado
 // ============================================================================
 
 #include "config/ConfigParser.hpp"
-#include "core/Clock.hpp"
-#include "core/CPU.hpp"
-#include "core/SimulationConfig.hpp"
-#include "core/Task.hpp"
+#include "core/Simulator.hpp"
+#include "scheduler/FIFoScheduler.hpp"
+#include "view/GantAscii.hpp"
 
-#include <iomanip>
+#include <SFML/Graphics.hpp>
 #include <iostream>
+#include <memory>
+#include <sstream>
 #include <vector>
 
+// ----------------------------------------------------------------------------
+// Executa a simulacao no terminal (sem janela).
+// ----------------------------------------------------------------------------
+static void runSimulationOnTerminal(sim::Simulator& simulator) {
+    std::cout << "\n========== EXECUCAO TICK A TICK ==========\n";
+    std::cout << "(escalonador: " << simulator.scheduler().name() << ")\n\n";
+
+    // Historico: para cada tick, qual tarefa estava em cada CPU.
+    // Usado para imprimir o Gantt final em formato tabular.
+    std::vector<std::vector<int>> history;
+
+    // Imprime estado inicial (tick 0).
+    sim::GanttAscii::printTickLine(std::cout, simulator);
+
+    // Roda tick a tick. step() retorna false quando acaba.
+    while (simulator.step()) {
+        sim::GanttAscii::printTickLine(std::cout, simulator);
+
+        // Captura o estado das CPUs neste tick.
+        std::vector<int> snapshot;
+        snapshot.reserve(simulator.cpus().size());
+        for (const auto& cpu : simulator.cpus()) {
+            snapshot.push_back(cpu.current_task_id);
+        }
+        history.push_back(std::move(snapshot));
+    }
+
+    sim::GanttAscii::printFinalChart(std::cout, history);
+    sim::GanttAscii::printReport(std::cout, simulator);
+}
+
 int main(int argc, char* argv[]) {
-    // ------------------------------------------------------------------
-    // 1. Testa Clock
-    // ------------------------------------------------------------------
-    std::cout << "===== TESTE: Clock =====\n";
-    sim::Clock clock;
-    std::cout << "Clock inicial: " << clock.now() << "\n";
-    clock.tick();
-    clock.tick();
-    clock.tick();
-    std::cout << "Apos 3 ticks: " << clock.now() << "\n";
-    clock.setTo(-99);  // valor invalido: deve virar 0
-    std::cout << "Apos setTo(-99): " << clock.now() << " (esperado: 0)\n";
-    clock.setTo(42);
-    std::cout << "Apos setTo(42): " << clock.now() << "\n";
-    std::cout << "\n";
+    // ----------------------------------------------------------------
+    // 1. Argumentos da linha de comando
+    // ----------------------------------------------------------------
+    std::string config_path = "config/exemplo.cfg";
+    bool headless = false;
 
-    // ------------------------------------------------------------------
-    // 2. Testa CPU
-    // ------------------------------------------------------------------
-    std::cout << "===== TESTE: CPU =====\n";
-    std::vector<sim::CPU> cpus;
-    cpus.emplace_back(0);
-    cpus.emplace_back(1);
-    cpus[0].current_task_id = 3;  // simulando atribuicao
-    for (const auto& cpu : cpus) {
-        std::cout << "CPU " << cpu.id
-                  << " | isOff=" << (cpu.isOff() ? "sim" : "nao")
-                  << " | task_id=" << cpu.current_task_id
-                  << "\n";
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--headless") {
+            headless = true;
+        } else {
+            config_path = arg;
+        }
     }
-    std::cout << "\n";
 
-    // ------------------------------------------------------------------
-    // 3. Testa ConfigParser com o arquivo .cfg
-    // ------------------------------------------------------------------
-    std::cout << "===== TESTE: ConfigParser =====\n";
-    std::string path = (argc > 1) ? argv[1] : "config/exemplo.cfg";
-    std::cout << "Carregando: " << path << "\n";
-
+    // ----------------------------------------------------------------
+    // 2. Parser
+    // ----------------------------------------------------------------
+    std::cout << "[INFO] Carregando configuracao: " << config_path << '\n';
     sim::ConfigParser parser;
-    auto result = parser.parseFile(path);
+    auto parse = parser.parseFile(config_path);
 
-    // Mostra warnings
-    for (const auto& w : result.warnings) {
-        std::cout << "  [AVISO] " << w << "\n";
+    for (const auto& w : parse.warnings) {
+        std::cerr << "[AVISO] " << w << '\n';
     }
-
-    if (!result.ok()) {
-        std::cout << "  FALHOU:\n";
-        for (const auto& e : result.errors) {
-            std::cout << "    - " << e << "\n";
+    if (!parse.ok()) {
+        std::cerr << "[ERRO] Falha ao carregar configuracao:\n";
+        for (const auto& e : parse.errors) {
+            std::cerr << "  - " << e << '\n';
         }
         return 1;
     }
 
-    std::cout << "  Algoritmo : " << sim::toString(result.config->algorithm)
-              << "\n";
-    std::cout << "  Quantum   : " << result.config->quantum << "\n";
-    std::cout << "  CPUs      : " << result.config->num_cpus << "\n";
-    std::cout << "  Tarefas   : " << result.tasks.size() << "\n\n";
+    // ----------------------------------------------------------------
+    // 3. Criacao do Simulator
+    // ----------------------------------------------------------------
+    // FIFOScheduler eh PROVISORIO. Sera substituido por SRTF/PRIOp baseado
+    // em parse.config->algorithm na proxima etapa.
+    auto scheduler = std::make_unique<sim::FIFOScheduler>();
+    sim::Simulator simulator(
+        *parse.config,
+        std::move(parse.tasks),
+        std::move(scheduler)
+    );
 
-    // Lista as tarefas
-    std::cout << std::left
-              << std::setw(4)  << "ID"
-              << std::setw(10) << "Ingresso"
-              << std::setw(10) << "Duracao"
-              << std::setw(12) << "Prioridade"
-              << std::setw(8)  << "R"
-              << std::setw(8)  << "G"
-              << std::setw(8)  << "B"
-              << "\n";
-    std::cout << std::string(60, '-') << "\n";
-    for (const auto& t : result.tasks) {
-        std::cout << std::left
-                  << std::setw(4)  << t.id
-                  << std::setw(10) << t.arrival_time
-                  << std::setw(10) << t.total_duration
-                  << std::setw(12) << t.static_priority
-                  << std::setw(8)  << static_cast<int>(t.color.r)
-                  << std::setw(8)  << static_cast<int>(t.color.g)
-                  << std::setw(8)  << static_cast<int>(t.color.b)
-                  << "\n";
+    std::cout << "[INFO] Simulator inicializado: "
+              << simulator.config().num_cpus << " CPUs, "
+              << simulator.tasks().size() << " tarefas, "
+              << "algoritmo " << simulator.scheduler().name() << '\n';
+
+    // ----------------------------------------------------------------
+    // 4. Executa simulacao
+    // ----------------------------------------------------------------
+    runSimulationOnTerminal(simulator);
+
+    if (headless) return 0;
+
+    // ----------------------------------------------------------------
+    // 5. Janela SFML (palco do Gantt grafico nas proximas etapas)
+    // ----------------------------------------------------------------
+    sf::RenderWindow window(
+        sf::VideoMode(1200, 600),
+        "Simulador SO - Simulacao concluida"
+    );
+    window.setFramerateLimit(60);
+
+    sf::Font font;
+    bool font_ok = font.loadFromFile("assets/fonts/Roboto.ttf");
+    if (!font_ok) {
+        std::cerr << "[AVISO] Fonte nao encontrada em assets/fonts/Roboto.ttf\n";
     }
-    std::cout << "\nTodos os testes passaram. Componentes integrados OK!\n";
+
+    std::stringstream status;
+    status << "Simulacao concluida.\n\n"
+           << "Algoritmo : " << simulator.scheduler().name() << "\n"
+           << "Tick final: " << simulator.currentTick() << "\n"
+           << "Tarefas   : " << simulator.tasks().size() << "\n\n"
+           << "Veja o terminal para o Gantt ASCII e o relatorio.\n"
+           << "A renderizacao grafica vira na proxima etapa.\n\n"
+           << "Pressione ESC para sair.";
+
+    sf::Text status_text(status.str(), font, 18);
+    status_text.setFillColor(sf::Color::White);
+    status_text.setPosition(40.f, 40.f);
+
+    while (window.isOpen()) {
+        sf::Event event;
+        while (window.pollEvent(event)) {
+            if (event.type == sf::Event::Closed) window.close();
+            if (event.type == sf::Event::KeyPressed &&
+                event.key.code == sf::Keyboard::Escape) window.close();
+        }
+        window.clear(sf::Color(30, 30, 35));
+        window.draw(status_text);
+        window.display();
+    }
 
     return 0;
 }
