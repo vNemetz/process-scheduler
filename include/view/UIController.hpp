@@ -1,32 +1,55 @@
-#pragma once 
+#pragma once
+
 #include <SFML/Graphics.hpp>
 #include <vector>
+#include <string>
+#include <map>
 
-namespace view{
+#include "core/OperatingSystem.hpp"
+#include "core/Task.hpp"
 
-  struct PlotArea{
-    sf::FloatRect rect;
-    float xmin, xmax, ymin, ymax;
-  };
+namespace view {
 
-  class UIController{
-  public:
-    UIController();
-    void execute();
-  private:
-    void processEvents();
-    void render();
-    void buildDemoData();
+    struct PlotArea {
+        sf::FloatRect rect;
+        float xmin;
+        float xmax;
+        float ymin;
+        float ymax;
+    };
 
-    sf::Vector2f mapToScreen(float x, float y, const view::PlotArea& p);
-    void drawGrid(sf::RenderTarget& target, const view::PlotArea& p, int xTicks, int yTicks);
-    void drawAxes(sf::RenderTarget& target, const view::PlotArea& p);
-    void drawLine(sf::RenderTarget& target, const view::PlotArea& p,
-            const std::vector<sf::Vector2f>& data);
+    class UIController {
+    public:
+        UIController(const std::vector<sim::GlobalState>& history, 
+                     const std::vector<sim::Task>& initialTasks);
 
-    sf::RenderWindow window;
-    PlotArea plot;
-    std::vector<sf::Vector2f> data;
-  };
+        void execute();
+
+    private:
+        sf::RenderWindow window;
+        PlotArea plot;
+
+        sf::Font font;
+
+        // Simulation data
+        std::vector<sim::GlobalState> historyData;
+        std::map<int, sf::Color> taskColors;
+        int currentTimeIndex; 
+
+        // Internal methods
+        void processEvents();
+        void render();
+        
+        // Drawing methods
+        sf::Vector2f mapToScreen(float x, float y, const view::PlotArea& p);
+        void drawGrid(sf::RenderTarget& target, const view::PlotArea& p, int xTicks, int yTicks);
+        void drawAxes(sf::RenderTarget& target, const view::PlotArea& p);
+        void drawGantt(sf::RenderTarget& target, const view::PlotArea& p);
+
+        void drawLabels(sf::RenderTarget& target, const view::PlotArea& p);
+
+        // Helper to convert HEX colors to SFML colors (rgb)
+        sf::Color parseHexColor(const std::string& hexStr);
+    };
 
 }

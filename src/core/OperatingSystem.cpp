@@ -176,12 +176,18 @@ namespace sim
     return true;
   }
 
-  void OperatingSystem::execute()
+  bool OperatingSystem::execute()
   {
     while (!isFinished())
     {
       this->executeOneTick();
     }
+    return true;
+  }
+
+  const std::vector<GlobalState> &OperatingSystem::getSnapshotsHistory() const
+  {
+    return this->globalStates;
   }
 
 }

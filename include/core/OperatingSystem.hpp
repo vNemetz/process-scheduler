@@ -12,16 +12,6 @@
 namespace sim
 {
 
-    // Nota: SchedulerType ja esta definido em SimulationConfig.hpp.
-    // A versao abaixo foi mantida por ora — remover depois de migrar os usos.
-  /*
-    enum class SchedulerType
-    {
-        PRIOP,
-        SRTF
-    };
-  */
-   
 
     // Fotografia completa do estado do SO em um dado tick.
     struct GlobalState
@@ -38,40 +28,39 @@ namespace sim
         std::vector<Task> tasks;
         std::vector<CPU> cpus;
         Clock clock;
-        IScheduler* scheduler;
+        IScheduler *scheduler;
 
         int quantum;
 
-        std::vector<GlobalState> globalStates;  // historico: um snapshot por tick
-        int currentIndex;                       // posicao atual no historico
+        std::vector<GlobalState> globalStates; // historico: um snapshot por tick
+        int currentIndex;                      // posicao atual no historico
 
         void saveSnapshot();
-        void restoreSnapshot(int index);
 
         void admitArrivals();
         void handleRunningTasks();
         void dispatch();
         void executeOneTick();
 
-        std::vector<Task*> getReadyTasks();
-        Task* findTaskById(int id);
+        std::vector<Task *> getReadyTasks();
+        Task *findTaskById(int id);
 
     public:
         OperatingSystem(std::string schedulerType,
-                          int quantum,
-                          int cpus,
-                          std::vector<Task> tasks
-                         );
+                        int quantum,
+                        int cpus,
+                        std::vector<Task> tasks);
 
-        void execute();
+        bool execute();
 
         bool isFinished() const;
+        const std::vector<GlobalState> &getSnapshotsHistory() const;
 
-        int getCurrentTick()                 const { return clock.getTime(); }
-        const std::vector<Task>& getTasks()  const { return tasks; }
-        const std::vector<CPU>& getCpus()    const { return cpus; }
-        const IScheduler& getScheduler()     const { return *scheduler; }
-        const SimulationConfig& getConfig()  const { return config; }
+        int getCurrentTick() const { return clock.getTime(); }
+        const std::vector<Task> &getTasks() const { return tasks; }
+        const std::vector<CPU> &getCpus() const { return cpus; }
+        const IScheduler &getScheduler() const { return *scheduler; }
+        const SimulationConfig &getConfig() const { return config; }
     };
 
 }

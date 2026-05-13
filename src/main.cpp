@@ -4,6 +4,7 @@
 
 #include "config/ConfigParser.hpp"
 #include "core/OperatingSystem.hpp"
+#include "view/UIController.hpp"
 
 int main()
 {
@@ -16,7 +17,12 @@ int main()
 
     //Starts and executes the Operating System
     sim::OperatingSystem os(std::move(schedulerType), quantum, cpus, tasks);
-    os.execute();
+    bool success = os.execute();
+    std::cout << success << std::endl;
 
+    //Starts graphics interface
+    view::UIController ui(os.getSnapshotsHistory(), tasks);
+    ui.execute();
+    
     return 0;
 }
