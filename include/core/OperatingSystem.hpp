@@ -31,17 +31,19 @@ namespace sim
         std::vector<CPU> cpus;
     };
 
-    class OperationalSystem
+    class OperatingSystem
     {
     private:
-        SimulationConfig config_;
-        std::vector<Task> tasks_;
-        std::vector<CPU> cpus_;
-        Clock clock_;
-        std::unique_ptr<IScheduler> scheduler_;
+        SimulationConfig config;
+        std::vector<Task> tasks;
+        std::vector<CPU> cpus;
+        Clock clock;
+        IScheduler* scheduler;
 
-        std::vector<GlobalState> globalStates_;  // historico: um snapshot por tick
-        int currentIndex_;                       // posicao atual no historico
+        int quantum;
+
+        std::vector<GlobalState> globalStates;  // historico: um snapshot por tick
+        int currentIndex;                       // posicao atual no historico
 
         void initializeTasks();
         void initializeCPUs();
@@ -56,12 +58,13 @@ namespace sim
 
         std::vector<Task*> getReadyTasks();
         Task* findTaskById(int id);
-        Task* findRunningTaskOnCpu(int cpu_id);
 
     public:
-        OperationalSystem(SimulationConfig config,
-                          std::vector<Task> tasks,
-                          std::unique_ptr<IScheduler> scheduler);
+        OperatingSystem(std::string schedulerType,
+                          int quantum,
+                          int cpus,
+                          std::vector<Task> tasks
+                         );
 
         void execute();
         void incrementTick();
@@ -69,11 +72,11 @@ namespace sim
 
         bool isFinished() const;
 
-        int currentTick()                 const { return clock_.getTime(); }
-        const std::vector<Task>& tasks()  const { return tasks_; }
-        const std::vector<CPU>& cpus()    const { return cpus_; }
-        const IScheduler& scheduler()     const { return *scheduler_; }
-        const SimulationConfig& config()  const { return config_; }
+        int getCurrentTick()                 const { return clock.getTime(); }
+        const std::vector<Task>& getTasks()  const { return tasks; }
+        const std::vector<CPU>& getCpus()    const { return cpus; }
+        const IScheduler& getScheduler()     const { return *scheduler; }
+        const SimulationConfig& getConfig()  const { return config; }
     };
 
-} // namespace sim
+}

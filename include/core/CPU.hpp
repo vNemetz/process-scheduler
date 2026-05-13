@@ -1,24 +1,17 @@
 #pragma once
 
-namespace sim {
+namespace sim
+{
 
-struct CPU {
-    int id;
-    int currentTaskId = -1;
-    int ticksOff = 0;   //A count for ticks where the CPU wasn't running
+    struct CPU
+    {
+        int id;
+        int currentTaskId;
+        int currentQuantumTime;
 
-  
-    CPU(int _id){id = _id;}
+        CPU(int _id) : id(_id), currentTaskId(-1), currentQuantumTime(0){};
 
-    void runTick(){
-        if(isRunning()){
-            //TODO
-        }else{
-            ticksOff++;
-        }
-    }
-
-    bool isRunning() const { return currentTaskId != -1; }
-};
+        bool isRunning() const { return currentTaskId != -1; }
+    };
 
 }
