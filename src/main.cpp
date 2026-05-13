@@ -1,60 +1,58 @@
 // ============================================================================
 // main.cpp — Ponto de entrada do Simulador de SO Multitarefa
 // ============================================================================
-// O main eh propositalmente CURTO. Ele orquestra os componentes, mas nao
-// contem logica de negocio. Tudo de "interessante" esta nas classes.
-//
 // Fluxo:
 //   1. Le argumentos da linha de comando (path do .cfg, modo headless)
 //   2. Parser le e valida o .cfg
-//   3. Cria o Simulator com FIFOScheduler provisorio
-//   4. Executa a simulacao (tick a tick, com log no terminal)
-//   5. Mostra Gantt ASCII final + relatorio
-//   6. (Se nao for headless) abre janela SFML com info do resultado
+//   3. Cria o Simulator
+//   4. Carrega fonte e cria o GanttRenderer (antes da simulacao!)
+//   5. Executa a simulacao — alimenta terminal E renderer ao mesmo tempo
+//   6. Abre janela SFML e entra no loop de desenho
 // ============================================================================
 
 #include "config/ConfigParser.hpp"
 #include "core/Simulator.hpp"
 #include "scheduler/FIFoScheduler.hpp"
 #include "view/GantAscii.hpp"
+#include "view/GanttRenderer.hpp"
 
 #include <SFML/Graphics.hpp>
 #include <iostream>
 #include <memory>
-#include <sstream>
 #include <vector>
 
 // ----------------------------------------------------------------------------
-// Executa a simulacao no terminal (sem janela).
+// Executa a simulacao tick a tick, alimentando o terminal e o renderer.
 // ----------------------------------------------------------------------------
-static void runSimulationOnTerminal(sim::Simulator& simulator) {
+static void runSimulation(sim::Simulator& simulator, sim::GanttRenderer& renderer) {
     std::cout << "\n========== EXECUCAO TICK A TICK ==========\n";
     std::cout << "(escalonador: " << simulator.scheduler().name() << ")\n\n";
 
-    // Historico: para cada tick, qual tarefa estava em cada CPU.
-    // Usado para imprimir o Gantt final em formato tabular.
     std::vector<std::vector<int>> history;
 
-    // Imprime estado inicial (tick 0).
     sim::GanttAscii::printTickLine(std::cout, simulator);
 
-    // Roda tick a tick. step() retorna false quando acaba.
     while (simulator.step()) {
         sim::GanttAscii::printTickLine(std::cout, simulator);
 
-        // Captura o estado das CPUs neste tick.
+        // Alimenta o GanttRenderer com o estado atual das CPUs.
+        renderer.addTick(simulator.currentTick(), simulator.cpus());
+
+        // Captura historico para o Gantt ASCII final.
         std::vector<int> snapshot;
-        snapshot.reserve(simulator.cpus().size());
-        for (const auto& cpu : simulator.cpus()) {
-            snapshot.push_back(cpu.currentTaskId);
+        for (int i = 0; i < (int)simulator.cpus().size(); i++) {
+            snapshot.push_back(simulator.cpus()[i].currentTaskId);
         }
-        history.push_back(std::move(snapshot));
+        history.push_back(snapshot);
     }
 
     sim::GanttAscii::printFinalChart(std::cout, history);
     sim::GanttAscii::printReport(std::cout, simulator);
 }
 
+// ----------------------------------------------------------------------------
+// main
+// ----------------------------------------------------------------------------
 int main(int argc, char* argv[]) {
     // ----------------------------------------------------------------
     // 1. Argumentos da linha de comando
@@ -78,13 +76,13 @@ int main(int argc, char* argv[]) {
     sim::ConfigParser parser;
     auto parse = parser.parseFile(config_path);
 
-    for (const auto& w : parse.warnings) {
-        std::cerr << "[AVISO] " << w << '\n';
+    for (int i = 0; i < (int)parse.warnings.size(); i++) {
+        std::cerr << "[AVISO] " << parse.warnings[i] << '\n';
     }
     if (!parse.ok()) {
         std::cerr << "[ERRO] Falha ao carregar configuracao:\n";
-        for (const auto& e : parse.errors) {
-            std::cerr << "  - " << e << '\n';
+        for (int i = 0; i < (int)parse.errors.size(); i++) {
+            std::cerr << "  - " << parse.errors[i] << '\n';
         }
         return 1;
     }
@@ -92,8 +90,6 @@ int main(int argc, char* argv[]) {
     // ----------------------------------------------------------------
     // 3. Criacao do Simulator
     // ----------------------------------------------------------------
-    // FIFOScheduler eh PROVISORIO. Sera substituido por SRTF/PRIOp baseado
-    // em parse.config->algorithm na proxima etapa.
     auto scheduler = std::make_unique<sim::FIFOScheduler>();
     sim::Simulator simulator(
         *parse.config,
@@ -107,39 +103,32 @@ int main(int argc, char* argv[]) {
               << "algoritmo " << simulator.scheduler().name() << '\n';
 
     // ----------------------------------------------------------------
-    // 4. Executa simulacao
+    // 4. Fonte e GanttRenderer
     // ----------------------------------------------------------------
-    runSimulationOnTerminal(simulator);
+    // A fonte eh carregada aqui — antes da simulacao — porque o renderer
+    // precisa existir durante o loop de execucao para receber os ticks.
+    sf::Font font;
+    if (!font.loadFromFile("assets/fonts/tuffy.ttf")) {
+        std::cerr << "[AVISO] Fonte nao encontrada em assets/fonts/tuffy.ttf\n";
+    }
+
+    sim::GanttRenderer renderer(font, simulator.tasks());
+
+    // ----------------------------------------------------------------
+    // 5. Executa simulacao
+    // ----------------------------------------------------------------
+    runSimulation(simulator, renderer);
 
     if (headless) return 0;
 
     // ----------------------------------------------------------------
-    // 5. Janela SFML (palco do Gantt grafico nas proximas etapas)
+    // 6. Janela SFML — loop de desenho
     // ----------------------------------------------------------------
     sf::RenderWindow window(
-        sf::VideoMode(1200, 600),
-        "Simulador SO - Simulacao concluida"
+        sf::VideoMode(1200, 700),
+        "Simulador SO - Gantt"
     );
     window.setFramerateLimit(60);
-
-    sf::Font font;
-    bool font_ok = font.loadFromFile("assets/fonts/Roboto.ttf");
-    if (!font_ok) {
-        std::cerr << "[AVISO] Fonte nao encontrada em assets/fonts/Roboto.ttf\n";
-    }
-
-    std::stringstream status;
-    status << "Simulacao concluida.\n\n"
-           << "Algoritmo : " << simulator.scheduler().name() << "\n"
-           << "Tick final: " << simulator.currentTick() << "\n"
-           << "Tarefas   : " << simulator.tasks().size() << "\n\n"
-           << "Veja o terminal para o Gantt ASCII e o relatorio.\n"
-           << "A renderizacao grafica vira na proxima etapa.\n\n"
-           << "Pressione ESC para sair.";
-
-    sf::Text status_text(status.str(), font, 18);
-    status_text.setFillColor(sf::Color::White);
-    status_text.setPosition(40.f, 40.f);
 
     while (window.isOpen()) {
         sf::Event event;
@@ -148,8 +137,9 @@ int main(int argc, char* argv[]) {
             if (event.type == sf::Event::KeyPressed &&
                 event.key.code == sf::Keyboard::Escape) window.close();
         }
+
         window.clear(sf::Color(30, 30, 35));
-        window.draw(status_text);
+        renderer.draw(window);
         window.display();
     }
 
