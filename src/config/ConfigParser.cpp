@@ -109,8 +109,8 @@ std::optional<SimulationConfig> ConfigParser::parseHeader(const std::string& lin
     SimulationConfig cfg;
 
     // Campo 0: algoritmo (case-insensitive — req. 3.3.2)
-    cfg.algorithm = parseSchedulerAlgo(trim(tokens[0]));
-    if (cfg.algorithm == SchedulerAlgo::UNKNOWN) {
+    cfg.algorithm = parseSchedulerType(trim(tokens[0]));
+    if (cfg.algorithm == SchedulerType::UNKNOWN) {
         addError("algoritmo desconhecido: '" + tokens[0] + "'. "
                  "Suportados: SRTF, PRIOP");
         return std::nullopt;

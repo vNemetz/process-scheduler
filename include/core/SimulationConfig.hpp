@@ -24,7 +24,7 @@ namespace sim {
 // Manter como enum (e nao string) permite usar 'switch' eficiente no
 // factory do escalonador. UNKNOWN sinaliza "li algo do arquivo mas nao
 // reconheci" — eh tratado como erro pelo parser.
-enum class SchedulerAlgo {
+enum class SchedulerType {
     SRTF,     // Shortest Remaining Time First
     PRIOP,    // Prioridade Preemptiva
     UNKNOWN
@@ -36,7 +36,7 @@ enum class SchedulerAlgo {
 // Funcao 'inline' definida no header para evitar precisar de um .cpp
 // separado para algo tao simples. Mesmo motivo do toString em Task.hpp:
 // evita violacao da One Definition Rule.
-inline SchedulerAlgo parseSchedulerAlgo(const std::string& s) {
+inline SchedulerType parseSchedulerType(const std::string& s) {
     // Cria copia em uppercase para comparacao.
     std::string upper;
     upper.reserve(s.size());
@@ -48,17 +48,17 @@ inline SchedulerAlgo parseSchedulerAlgo(const std::string& s) {
         ));
     }
 
-    if (upper == "SRTF")  return SchedulerAlgo::SRTF;
-    if (upper == "PRIOP") return SchedulerAlgo::PRIOP;
-    return SchedulerAlgo::UNKNOWN;
+    if (upper == "SRTF")  return SchedulerType::SRTF;
+    if (upper == "PRIOP") return SchedulerType::PRIOP;
+    return SchedulerType::UNKNOWN;
 }
 
 // Conversao inversa: enum para string legivel (logs, UI).
-inline const char* toString(SchedulerAlgo a) {
+inline const char* toString(SchedulerType a) {
     switch (a) {
-        case SchedulerAlgo::SRTF:    return "SRTF";
-        case SchedulerAlgo::PRIOP:   return "PRIOP";
-        case SchedulerAlgo::UNKNOWN: return "UNKNOWN";
+        case SchedulerType::SRTF:    return "SRTF";
+        case SchedulerType::PRIOP:   return "PRIOP";
+        case SchedulerType::UNKNOWN: return "UNKNOWN";
     }
     return "?";
 }
@@ -70,7 +70,7 @@ struct SimulationConfig {
     // Valores default (req. 3.2: "o software deve sugerir valores padrao
     // para todo os parametros de configuracao"). Sobrescritos pelo parser
     // se o arquivo trouxer valores especificos.
-    SchedulerAlgo algorithm = SchedulerAlgo::SRTF;
+    SchedulerType algorithm = SchedulerType::SRTF;
     int quantum  = 2;     // ticks por fatia de tempo
     int num_cpus = 2;     // minimo permitido pelo enunciado (req. geral 2)
 
