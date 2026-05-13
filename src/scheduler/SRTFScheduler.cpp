@@ -3,48 +3,75 @@
 
 namespace sim
 {
+
+  // Returns true if "a" should take "b" place as the selected task
+  bool SRTFScheduler::isShorter(Task *a, Task *b, Task *running)
+  {
+    // Shortest remaining time task is selected
+    if (a->remainingTime < b->remainingTime)
+    {
+      return true;
+    }
+    else if (a->remainingTime > b->remainingTime)
+    {
+      return false;
+    }
+
+    // Tie-break criteria
+
+    // 1. Already in CPU has priority
+    if (a == running)
+    {
+      return true;
+    }
+    if (b == running)
+    {
+      return false;
+    }
+
+    // 2. Order of arrival (the one that arrived first has priority)
+    if (a->arrivalTime < b->arrivalTime)
+    {
+      return true;
+    }
+    else if (a->arrivalTime > b->arrivalTime)
+    {
+      return false;
+    }
+
+    // 3. Total duration (shorter has priority)
+    if (a->totalDuration < b->totalDuration)
+    {
+      return true;
+    }
+    else if (a->totalDuration > b->totalDuration)
+    {
+      return false;
+    }
+
+    // 50% choice (last criteria)
+    return a->id < b->id;
+  }
+
   Task *SRTFScheduler::selectNextTask(std::vector<Task *> &readyQueue,
                                       Task *currentlyRunning, int currentTick)
   {
-    if (readyQueue.empty()) return nullptr;
-
-    // Candidato inicial: primeiro da fila (indice 0).
-    // O loop compara os seguintes contra ele, substituindo se encontrar alguem melhor.
-    Task *selectedTask = readyQueue[0];
-
-    for (int i = 1; i < readyQueue.size(); i++)
+    std::vector<Task *> candidates = readyQueue;
+    if (currentlyRunning != nullptr)
     {
-      bool remainingTimeDraw = readyQueue[i]->remainingTime == selectedTask->remainingTime;
-      bool firstArrivalDraw = remainingTimeDraw && readyQueue[i]->arrivalTime == selectedTask->arrivalTime;
-      bool totalDurationDraw = readyQueue[i]->totalDuration == selectedTask->totalDuration;
+      candidates.push_back(currentlyRunning);
+    }
+    if (candidates.empty())
+      return nullptr;
 
-      // Shortest remaining time task is selected
-      if (readyQueue[i]->remainingTime < selectedTask->remainingTime)
-      {
-        selectedTask = readyQueue[i];
-      }
-      // Priority for the currently running task
-      else if (remainingTimeDraw && readyQueue[i] == currentlyRunning)
-      {
-        selectedTask = readyQueue[i];
-      }
+    // First candidate
+    Task *selectedTask = candidates[0];
 
-      // Priority for the one that arrived first
-      else if (remainingTimeDraw && readyQueue[i]->arrivalTime < selectedTask->arrivalTime)
+    for (int i = 1; i < candidates.size(); i++)
+    {
+      if (this->isShorter(candidates[i], selectedTask, currentlyRunning))
       {
-        selectedTask = readyQueue[i];
-      }
-      // Priority for smaller total duration
-      else if (remainingTimeDraw && firstArrivalDraw && readyQueue[i]->totalDuration < selectedTask->totalDuration)
-      {
-        selectedTask = readyQueue[i];
-      }
-      else if (remainingTimeDraw && firstArrivalDraw && totalDurationDraw)
-      {
-        // 50% chance
-        bool alterSelected = rand() % 2 == 0;
-        if (alterSelected)
-          selectedTask = readyQueue[i];
+        selectedTask = candidates[i];
       }
     }
     return selectedTask;

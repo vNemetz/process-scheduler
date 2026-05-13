@@ -9,5 +9,7 @@ public:
                    int currentTick) override;
 
   std::string name() const override { return "SRTF"; }
+
+  bool isShorter(Task *a, Task *b, Task *running);
 };
 }
