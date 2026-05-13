@@ -15,10 +15,10 @@ void GanttAscii::printTickLine(std::ostream& os, const Simulator& s) {
     // Estado de cada CPU
     for (const auto& cpu : s.cpus()) {
         os << " CPU" << cpu.id << ":";
-        if (cpu.isOff()) {
+        if (!cpu.isRunning()) {
             os << "---";  // CPU desligada
         } else {
-            os << "T" << std::setw(2) << std::left << cpu.current_task_id
+            os << "T" << std::setw(2) << std::left << cpu.currentTaskId
                << std::right;
         }
     }
@@ -101,22 +101,20 @@ void GanttAscii::printReport(std::ostream& os, const Simulator& s) {
 
     for (const auto& t : s.tasks()) {
         // Turnaround = tempo entre chegada e fim (inclusive)
-        int turnaround = (t.finish_time >= 0)
-            ? (t.finish_time - t.arrival_time + 1)
+        int turnaround = (t.arrivalTime >= 0)
+            ? (t.arrivalTime - t.arrivalTime + 1)
             : -1;
 
         os << std::left
            << std::setw(4)  << t.id
-           << std::setw(10) << t.arrival_time
-           << std::setw(10) << t.total_duration
-           << std::setw(8)  << t.finish_time
+           << std::setw(10) << t.arrivalTime
+           << std::setw(10) << t.totalDuration
+           << std::setw(8)  << t.arrivalTime
            << std::setw(12) << turnaround
-           << std::setw(10) << t.ticks_waiting_ready
            << '\n';
 
         if (turnaround >= 0) {
             sum_turnaround += turnaround;
-            sum_wait_ready += t.ticks_waiting_ready;
             num_done++;
         }
     }
@@ -133,7 +131,7 @@ void GanttAscii::printReport(std::ostream& os, const Simulator& s) {
     os << "\nOciosidade por CPU:\n";
     for (const auto& cpu : s.cpus()) {
         os << "  CPU " << cpu.id << " : "
-           << cpu.ticks_off << " ticks desligada\n";
+           << cpu.ticksOff << " ticks desligada\n";
     }
     os << '\n';
 }

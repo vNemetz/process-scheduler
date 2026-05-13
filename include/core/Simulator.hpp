@@ -53,7 +53,7 @@ public:
     // Todos sao 'const' porque nao modificam o Simulator. Retornam
     // referencias const para evitar copias e proibir mutacao por fora.
 
-    int currentTick() const { return clock_.now(); }
+    int currentTick() const { return clock_.getTime(); }
     const std::vector<Task>& tasks() const { return tasks_; }
     const std::vector<CPU>& cpus() const { return cpus_; }
     const IScheduler& scheduler() const { return *scheduler_; }

@@ -46,7 +46,7 @@ static void runSimulationOnTerminal(sim::Simulator& simulator) {
         std::vector<int> snapshot;
         snapshot.reserve(simulator.cpus().size());
         for (const auto& cpu : simulator.cpus()) {
-            snapshot.push_back(cpu.current_task_id);
+            snapshot.push_back(cpu.currentTaskId);
         }
         history.push_back(std::move(snapshot));
     }

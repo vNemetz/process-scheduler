@@ -22,9 +22,9 @@ class FIFOScheduler : public IScheduler {
 public:
     // 'override' explicita que estamos sobrescrevendo um metodo virtual da
     // base. Boa pratica em C++11+: se errar a assinatura, o compilador avisa.
-    Task* selectNext(std::vector<Task*>& ready_queue,
-                     Task* currently_running,
-                     int current_tick) override;
+    Task* selectNextTask(std::vector<Task*>& readyQueue,
+                     Task* currentlyRunning,
+                     int currentTick) override;
 
     std::string name() const override { return "FIFO (provisorio)"; }
 };

@@ -8,7 +8,7 @@
 
 namespace sim {
 
-Task* FIFOScheduler::selectNext(std::vector<Task*>& ready_queue,
+Task* FIFOScheduler::selectNextTask(std::vector<Task*>& ready_queue,
                                 Task* currently_running,
                                 int /*current_tick*/)
 {
@@ -29,7 +29,7 @@ Task* FIFOScheduler::selectNext(std::vector<Task*>& ready_queue,
     auto it = std::min_element(
         ready_queue.begin(), ready_queue.end(),
         [](const Task* a, const Task* b) {
-            return a->arrival_time < b->arrival_time;
+            return a->arrivalTime < b->arrivalTime;
         }
     );
 

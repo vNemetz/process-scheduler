@@ -48,7 +48,7 @@ bool Simulator::step() {
 
     // Avanca o relogio. Convencao: tick N significa "estado do sistema
     // apos N ticks ja terem se passado".
-    clock_.tick();
+    clock_.increment();
 
     // Sequencia das 4 fases:
     admitArrivals();        // FASE 1
@@ -92,7 +92,7 @@ bool Simulator::isFinished() const {
 // Promove tarefas NEW para READY assim que seu arrival_time chega.
 // Esse eh o equivalente a "fork()" no nosso SO simulado: tarefa nasce.
 void Simulator::admitArrivals() {
-    int now = clock_.now();
+    int now = clock_.getTime();
     for (auto& t : tasks_) {
         if (t.state == TaskState::NEW && t.hasArrived(now)) {
             t.state = TaskState::READY;
@@ -112,23 +112,23 @@ void Simulator::admitArrivals() {
 // olhando se algo terminou/estourou durante o tick N-1.
 void Simulator::handleRunningTasks() {
     for (auto& cpu : cpus_) {
-        if (cpu.isOff()) continue;
+        if (!cpu.isRunning()) continue;
 
-        Task* task = findTaskById(cpu.current_task_id);
+        Task* task = findTaskById(cpu.currentTaskId);
         if (!task) continue;  // defesa: nao deveria acontecer
 
         // (a) Tarefa terminou
-        if (task->remaining_time <= 0) {
+        if (task->remainingTime <= 0) {
             task->state = TaskState::TERMINATED;
-            task->finish_time = clock_.now() - 1;  // terminou no tick anterior
-            task->cpu_assigned = -1;
-            cpu.current_task_id = -1;
+            task->arrivalTime = clock_.getTime() - 1;  // terminou no tick anterior
+            task->cpuAssigned = -1;
+            cpu.currentTaskId = -1;
         }
         // (b) Estourou quantum -> preempcao por timeout
-        else if (task->quantum_left <= 0) {
+        else if (task->quantumTicksLeft <= 0) {
             task->state = TaskState::READY;
-            task->cpu_assigned = -1;
-            cpu.current_task_id = -1;
+            task->cpuAssigned = -1;
+            cpu.currentTaskId = -1;
         }
         // (c) caso contrario, continua rodando — nada a fazer
     }
@@ -150,7 +150,7 @@ void Simulator::dispatch() {
         std::vector<Task*> ready = getReadyTasks();
 
         // O escalonador decide retornando um Task* ou nullptr.
-        Task* chosen = scheduler_->selectNext(ready, current, clock_.now());
+        Task* chosen = scheduler_->selectNextTask(ready, current, clock_.getTime());
 
         // CASO A: escalonador escolheu a mesma tarefa que ja rodava → continua
         if (chosen == current) {
@@ -160,25 +160,25 @@ void Simulator::dispatch() {
         // CASO B: havia uma tarefa rodando e foi preemptada
         if (current != nullptr) {
             current->state = TaskState::READY;
-            current->cpu_assigned = -1;
+            current->cpuAssigned = -1;
         }
 
         // CASO C: nao escolheu nada → CPU fica desligada
         if (chosen == nullptr) {
-            cpu.current_task_id = -1;
+            cpu.currentTaskId = -1;
             continue;
         }
 
         // CASO D: nova tarefa atribuida.
         // Se ela ja estava em outra CPU, libera essa outra primeiro.
-        if (chosen->cpu_assigned != -1 && chosen->cpu_assigned != cpu.id) {
-            cpus_[chosen->cpu_assigned].current_task_id = -1;
+        if (chosen->cpuAssigned != -1 && chosen->cpuAssigned != cpu.id) {
+            cpus_[chosen->cpuAssigned].currentTaskId = -1;
         }
 
         chosen->state = TaskState::RUNNING;
-        chosen->cpu_assigned = cpu.id;
-        chosen->quantum_left = config_.quantum;  // reseta quantum no dispatch
-        cpu.current_task_id = chosen->id;
+        chosen->cpuAssigned = cpu.id;
+        chosen->quantumTicksLeft = config_.quantum;  // reseta quantum no dispatch
+        cpu.currentTaskId = chosen->id;
     }
 }
 
@@ -190,19 +190,14 @@ void Simulator::dispatch() {
 void Simulator::executeOneTick() {
     for (auto& t : tasks_) {
         if (t.isRunning()) {
-            t.remaining_time--;
-            t.quantum_left--;
-            t.ticks_executed++;
-        } else if (t.isReady()) {
-            t.ticks_waiting_ready++;
-        } else if (t.isSuspended()) {
-            t.ticks_waiting_suspended++;
+            t.remainingTime--;
+            t.quantumTicksLeft--;
         }
     }
 
     // Contador de "CPU desligada"
     for (auto& cpu : cpus_) {
-        if (cpu.isOff()) cpu.ticks_off++;
+        if (!cpu.isRunning()) cpu.ticksOff++;
     }
 }
 
@@ -221,7 +216,7 @@ std::vector<Task*> Simulator::getReadyTasks() {
 
 Task* Simulator::findRunningTaskOnCpu(int cpu_id) {
     if (cpu_id < 0 || cpu_id >= static_cast<int>(cpus_.size())) return nullptr;
-    int task_id = cpus_[cpu_id].current_task_id;
+    int task_id = cpus_[cpu_id].currentTaskId;
     if (task_id == -1) return nullptr;
     return findTaskById(task_id);
 }

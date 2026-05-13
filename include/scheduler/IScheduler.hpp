@@ -47,11 +47,10 @@ public:
     // Nota sobre ponteiros nao-owning: o IScheduler NAO eh dono das Task —
     // o Simulator eh. O escalonador apenas seleciona e devolve um ponteiro
     // para uma Task ja existente. Por isso usamos Task* cru (nao unique_ptr).
-    virtual Task* selectNext(std::vector<Task*>& ready_queue,
-                             Task* currently_running,
-                             int current_tick) = 0;
+    virtual Task* selectNextTask(std::vector<Task*>& readyQueue,
+                             Task* currentTask,
+                             int currentTick) = 0;
 
-    // Nome legivel do algoritmo (para logs e UI).
     virtual std::string name() const = 0;
 };
 
