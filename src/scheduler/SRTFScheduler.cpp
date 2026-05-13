@@ -6,18 +6,20 @@ namespace sim
   Task *SRTFScheduler::selectNextTask(std::vector<Task *> &readyQueue,
                                       Task *currentlyRunning, int currentTick)
   {
-    Task *selectedTask = nullptr;
+    if (readyQueue.empty()) return nullptr;
+
+    // Candidato inicial: primeiro da fila (indice 0).
+    // O loop compara os seguintes contra ele, substituindo se encontrar alguem melhor.
+    Task *selectedTask = readyQueue[0];
 
     for (int i = 1; i < readyQueue.size(); i++)
     {
-      if(selectedTask == nullptr) selectedTask = readyQueue[i];
-
       bool remainingTimeDraw = readyQueue[i]->remainingTime == selectedTask->remainingTime;
       bool firstArrivalDraw = remainingTimeDraw && readyQueue[i]->arrivalTime == selectedTask->arrivalTime;
       bool totalDurationDraw = readyQueue[i]->totalDuration == selectedTask->totalDuration;
 
       // Shortest remaining time task is selected
-      if (selectedTask == nullptr || readyQueue[i]->remainingTime < selectedTask->remainingTime)
+      if (readyQueue[i]->remainingTime < selectedTask->remainingTime)
       {
         selectedTask = readyQueue[i];
       }
