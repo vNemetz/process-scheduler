@@ -1,10 +1,10 @@
 #include <iostream>
 #include <vector>
 
-#include <Task.hpp>
-#include <CPU.hpp>
-#include <Clock.hpp>
-#include <IScheduler.hpp>
+#include <core/Task.hpp>
+#include <core/CPU.hpp>
+#include <core/Clock.hpp>
+#include <scheduler/IScheduler.hpp>
 
 namespace sim
 {

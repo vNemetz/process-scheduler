@@ -90,26 +90,24 @@ void GanttAscii::printReport(std::ostream& os, const Simulator& s) {
        << std::setw(10) << "Duracao"
        << std::setw(8)  << "Fim"
        << std::setw(12) << "Turnaround"
-       << std::setw(10) << "EsperaR"
        << '\n';
-    os << std::string(54, '-') << '\n';
+    os << std::string(44, '-') << '\n';
 
-    // Acumuladores para medias
     double sum_turnaround = 0.0;
-    double sum_wait_ready = 0.0;
     int    num_done = 0;
 
     for (const auto& t : s.tasks()) {
-        // Turnaround = tempo entre chegada e fim (inclusive)
-        int turnaround = (t.arrivalTime >= 0)
-            ? (t.arrivalTime - t.arrivalTime + 1)
+        // turnaround = finishTime - arrivalTime + 1
+        // O +1 conta o proprio tick de chegada como parte do tempo de resposta.
+        int turnaround = (t.finishTime >= 0)
+            ? (t.finishTime - t.arrivalTime + 1)
             : -1;
 
         os << std::left
            << std::setw(4)  << t.id
            << std::setw(10) << t.arrivalTime
            << std::setw(10) << t.totalDuration
-           << std::setw(8)  << t.arrivalTime
+           << std::setw(8)  << (t.finishTime >= 0 ? t.finishTime : -1)
            << std::setw(12) << turnaround
            << '\n';
 
@@ -119,12 +117,10 @@ void GanttAscii::printReport(std::ostream& os, const Simulator& s) {
         }
     }
 
-    os << std::string(54, '-') << '\n';
+    os << std::string(44, '-') << '\n';
     if (num_done > 0) {
-        os << "Turnaround medio   : "
+        os << "Turnaround medio: "
            << (sum_turnaround / num_done) << " ticks\n";
-        os << "Espera ready media : "
-           << (sum_wait_ready / num_done) << " ticks\n";
     }
 
     // Ociosidade por CPU

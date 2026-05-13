@@ -120,7 +120,7 @@ void Simulator::handleRunningTasks() {
         // (a) Tarefa terminou
         if (task->remainingTime <= 0) {
             task->state = TaskState::TERMINATED;
-            task->arrivalTime = clock_.getTime() - 1;  // terminou no tick anterior
+            task->finishTime = clock_.getTime() - 1;  // ultimo tick produtivo foi o anterior
             task->cpuAssigned = -1;
             cpu.currentTaskId = -1;
         }

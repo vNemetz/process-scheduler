@@ -55,6 +55,9 @@ struct Task {
 
     int quantumTicksLeft = 0;
 
+    // Metricas preenchidas durante a simulacao
+    int finishTime = -1;  // tick em que a tarefa terminou (-1 = ainda nao terminou)
+
     Task() = default;
 
 
