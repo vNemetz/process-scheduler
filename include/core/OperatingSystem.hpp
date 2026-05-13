@@ -45,9 +45,6 @@ namespace sim
         std::vector<GlobalState> globalStates;  // historico: um snapshot por tick
         int currentIndex;                       // posicao atual no historico
 
-        void initializeTasks();
-        void initializeCPUs();
-
         void saveSnapshot();
         void restoreSnapshot(int index);
 
@@ -67,8 +64,6 @@ namespace sim
                          );
 
         void execute();
-        void incrementTick();
-        void decrementTick();
 
         bool isFinished() const;
 
