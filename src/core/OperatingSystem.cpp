@@ -35,8 +35,9 @@ namespace sim
       scheduler = new SRTFScheduler();
     }
 
-    // Saves initial snapshot (time zero)
-    saveSnapshot();
+    // Nao salva snapshot inicial — o primeiro snapshot vem do primeiro
+    // executeOneTick, ja com o resultado do primeiro dispatch. Salvar aqui
+    // duplicaria o tick 0 e desalinharia indices do historico do tempo real.
   }
 
   void OperatingSystem::admitArrivals()

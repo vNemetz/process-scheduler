@@ -4,6 +4,10 @@
 
 namespace view {
 
+// Largura fixa em pixels que cada tick ocupa na tela.
+// Mudar esse valor "dá zoom" no Gantt (maior = celulas maiores, menos ticks visiveis).
+static const float TICK_WIDTH = 40.0f;
+
 sf::Vector2f UIController::mapToScreen(float x, float y, const view::PlotArea& p) {
     float nx = (x - p.xmin) / (p.xmax - p.xmin);
     float ny = (y - p.ymin) / (p.ymax - p.ymin);
@@ -35,13 +39,51 @@ UIController::UIController(const std::vector<sim::GlobalState>& history,
         }
     }
 
-    // Configura a área do gráfico dinamicamente
-    float maxTime = historyData.empty() ? 10.0f : static_cast<float>(historyData.size());
+    // Configura a area do grafico.
+    // xmin/xmax sao recalculados a cada frame por updateViewWindow().
+    // Valores iniciais sao apenas placeholders.
     plot = {
-        {80.f, 60.f, 1000.f, 460.f}, 
-        0.0f, maxTime,             // X: de 0 até o tempo máximo da simulação
-        0.0f, maxTaskId + 1.0f     // Y: de 0 até o maior ID de tarefa + um respiro
+        {80.f, 60.f, 1000.f, 460.f},
+        0.0f, 10.0f,                  // X: vai ser ajustado por updateViewWindow
+        0.0f, maxTaskId + 1.0f        // Y: de 0 ate o maior ID + um respiro
     };
+}
+
+// ----------------------------------------------------------------------------
+// updateViewWindow — desliza a janela visivel para manter o cursor visivel
+// ----------------------------------------------------------------------------
+// Estrategia: a janela visivel tem largura FIXA (visibleTicks). Se o cursor
+// sai pela direita, a janela rola para a direita; se sai pela esquerda,
+// rola para a esquerda. Nao deixa xmin ficar negativo.
+void UIController::updateViewWindow() {
+    int visibleTicks = (int)(plot.rect.width / TICK_WIDTH);
+    if (visibleTicks < 1) {
+        visibleTicks = 1;
+    }
+
+    int viewStart = (int)plot.xmin;
+    int viewEnd = viewStart + visibleTicks - 1;
+
+    // Cursor passou da direita: rola para a direita
+    if (currentTimeIndex > viewEnd) {
+        viewEnd = currentTimeIndex;
+        viewStart = viewEnd - visibleTicks + 1;
+    }
+
+    // Cursor passou da esquerda: rola para a esquerda
+    if (currentTimeIndex < viewStart) {
+        viewStart = currentTimeIndex;
+        viewEnd = viewStart + visibleTicks - 1;
+    }
+
+    // Nao deixar xmin ficar negativo (nao existe tick antes de 0)
+    if (viewStart < 0) {
+        viewStart = 0;
+        viewEnd = viewStart + visibleTicks - 1;
+    }
+
+    plot.xmin = (float)viewStart;
+    plot.xmax = (float)(viewEnd + 1);  // +1 para a ultima celula ocupar largura cheia
 }
 
 void UIController::execute() {
@@ -87,8 +129,11 @@ void UIController::processEvents() {
 void UIController::render() {
     window.clear(sf::Color(30, 30, 35));
 
-    // Desenhamos a grade baseada no tamanho dos dados
-    int xTicks = plot.xmax; 
+    // Atualiza a janela visivel para acompanhar o cursor de tempo.
+    updateViewWindow();
+
+    // Numero de divisoes verticais da grade = numero de ticks visiveis.
+    int xTicks = (int)(plot.xmax - plot.xmin);
     int yTicks = plot.ymax;
     drawGrid(window, plot, xTicks, yTicks);
     drawAxes(window, plot);
@@ -107,9 +152,10 @@ void UIController::drawLabels(sf::RenderTarget& target, const view::PlotArea& p)
     text.setFillColor(sf::Color(200, 200, 200));
 
     // 1. Desenhar Eixo X (Tempo / Quantuns)
-    // Vamos de 0 até o tempo máximo da simulação
-    int maxTime = static_cast<int>(p.xmax);
-    for (int t = 0; t <= maxTime; ++t) {
+    // So labels dos ticks que estao na janela visivel.
+    int viewStart = static_cast<int>(p.xmin);
+    int viewEnd = static_cast<int>(p.xmax);
+    for (int t = viewStart; t <= viewEnd; ++t) {
         text.setString(std::to_string(t));
         
         // Pega a posição na tela equivalente ao tempo 't' e Y = 0 (linha de baixo)
@@ -129,9 +175,11 @@ void UIController::drawLabels(sf::RenderTarget& target, const view::PlotArea& p)
         int taskId = it->first;
         
         text.setString("T" + std::to_string(taskId)); // Ex: "T1", "T2"
-        
-        // Pega a posição na tela: X = 0 (linha da esquerda), Y = ID da tarefa
-        sf::Vector2f pos = mapToScreen(0.0f, static_cast<float>(taskId), p);
+
+        // Posiciona o label na borda esquerda VISIVEL (p.xmin), nao no x=0
+        // absoluto. Sem isso, ao fazer scroll para frente o ponto x=0 sai
+        // da tela e os labels somem junto.
+        sf::Vector2f pos = mapToScreen(p.xmin, static_cast<float>(taskId), p);
         
         // Ajusta a posição para ficar à esquerda do eixo Y
         // Centraliza verticalmente subtraindo metade da altura da letra
@@ -159,8 +207,19 @@ void UIController::drawLabels(sf::RenderTarget& target, const view::PlotArea& p)
 void UIController::drawGantt(sf::RenderTarget& target, const view::PlotArea& p) {
     if (historyData.empty()) return;
 
-    // Percorre a simulação do instante 0 até o momento atual que o usuário selecionou nas setinhas
-    for (int t = 0; t <= currentTimeIndex; ++t) {
+    // Desenha TODOS os blocos da janela visivel — independente da posicao
+    // do cursor. O cursor e apenas um marcador, nao limita o que aparece.
+    // (Modelo "scroll": navegar nao apaga ticks que ja foram simulados.)
+    int startT = (int)p.xmin;
+    if (startT < 0) {
+        startT = 0;
+    }
+    int endT = (int)p.xmax - 1;
+    if (endT >= (int)historyData.size()) {
+        endT = (int)historyData.size() - 1;
+    }
+
+    for (int t = startT; t <= endT; ++t) {
         const sim::GlobalState& state = historyData[t];
 
         // Para cada CPU, verifica qual tarefa estava rodando
@@ -197,6 +256,21 @@ void UIController::drawGantt(sf::RenderTarget& target, const view::PlotArea& p) 
                 target.draw(rect);
             }
         }
+    }
+
+    // Destaque do cursor: borda amarela na coluna do currentTimeIndex.
+    // Desenhada por cima dos blocos para ficar sempre visivel.
+    if (currentTimeIndex >= startT && currentTimeIndex <= endT) {
+        sf::Vector2f cursorTL = mapToScreen((float)currentTimeIndex, p.ymax, p);
+        sf::Vector2f cursorBR = mapToScreen((float)(currentTimeIndex + 1), p.ymin, p);
+
+        sf::RectangleShape cursor;
+        cursor.setPosition(cursorTL.x, cursorTL.y);
+        cursor.setSize(sf::Vector2f(cursorBR.x - cursorTL.x, cursorBR.y - cursorTL.y));
+        cursor.setFillColor(sf::Color::Transparent);
+        cursor.setOutlineThickness(2.0f);
+        cursor.setOutlineColor(sf::Color(255, 220, 0));  // amarelo
+        target.draw(cursor);
     }
 }
 

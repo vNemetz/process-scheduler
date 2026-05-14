@@ -39,6 +39,10 @@ namespace view {
         // Internal methods
         void processEvents();
         void render();
+
+        // Recalcula plot.xmin e plot.xmax para manter o cursor de tempo
+        // (currentTimeIndex) sempre visivel, com tamanho fixo por tick.
+        void updateViewWindow();
         
         // Drawing methods
         sf::Vector2f mapToScreen(float x, float y, const view::PlotArea& p);
