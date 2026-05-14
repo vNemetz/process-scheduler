@@ -6,7 +6,6 @@
 #include "core/Task.hpp"
 #include "core/CPU.hpp"
 #include "core/Clock.hpp"
-#include "core/SimulationConfig.hpp"
 #include "scheduler/IScheduler.hpp"
 
 namespace sim
@@ -24,7 +23,6 @@ namespace sim
     class OperatingSystem
     {
     private:
-        SimulationConfig config;
         std::vector<Task> tasks;
         std::vector<CPU> cpus;
         Clock clock;
@@ -60,7 +58,6 @@ namespace sim
         const std::vector<Task> &getTasks() const { return tasks; }
         const std::vector<CPU> &getCpus() const { return cpus; }
         const IScheduler &getScheduler() const { return *scheduler; }
-        const SimulationConfig &getConfig() const { return config; }
     };
 
 }
