@@ -121,8 +121,12 @@ namespace sim
         if (nextTask != runningTask)
         {
           if (runningTask != nullptr)
+          {
             // Place running task back to the ready queue as it won't run next cycle
             runningTask->state = TaskState::READY;
+           
+            readyQueue.push_back(runningTask); //Place the preempted task back to the ready queue
+          }
 
           this->cpus[i].currentTaskId = nextTask->id;
           this->cpus[i].currentQuantumTime = 0;
