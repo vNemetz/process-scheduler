@@ -13,7 +13,7 @@ int main()
     std::vector<sim::Task> tasks;
 
     // Parser initializes the variables
-    sim::ConfigParser::parse("../config/config.txt", schedulerType, quantum, cpus, tasks);
+    sim::ConfigParser::parse("config/config.txt", schedulerType, quantum, cpus, tasks);
 
     //Starts and executes the Operating System
     sim::OperatingSystem os(std::move(schedulerType), quantum, cpus, tasks);

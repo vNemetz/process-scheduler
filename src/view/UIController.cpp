@@ -26,7 +26,7 @@ UIController::UIController(const std::vector<sim::GlobalState>& history,
 {
     window.setFramerateLimit(60);
 
-    if (!font.loadFromFile("../assets/fonts/Roboto-Regular.ttf")) {
+    if (!font.loadFromFile("assets/fonts/Roboto-Regular.ttf")) {
         std::cerr << "Could not get font for labels\n";
     }
 
