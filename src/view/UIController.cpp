@@ -22,7 +22,7 @@ UIController::UIController(const std::vector<sim::GlobalState>& history,
 {
     window.setFramerateLimit(60);
 
-    if (!font.loadFromFile("/config/Roboto-Regular.ttf")) {
+    if (!font.loadFromFile("../assets/fonts/Roboto-Regular.ttf")) {
         std::cerr << "Could not get font for labels\n";
     }
 
@@ -146,7 +146,7 @@ void UIController::drawLabels(sf::RenderTarget& target, const view::PlotArea& p)
     text.setFillColor(sf::Color::White);
     
     // Título do Eixo X
-    text.setString("Tempo (Ticks/Quantuns)");
+    text.setString("Time (Ticks/Quantuns)");
     text.setPosition(p.rect.left + p.rect.width / 2.0f - 80.0f, p.rect.top + p.rect.height + 35.0f);
     target.draw(text);
     
