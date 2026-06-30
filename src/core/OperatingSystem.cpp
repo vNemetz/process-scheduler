@@ -1,198 +1,198 @@
-#include <algorithm>
-#include <utility>
 #include "core/OperatingSystem.hpp"
-#include <scheduler/PRIOpScheduler.hpp>
-#include <scheduler/SRTFScheduler.hpp>
+#include "scheduler/SchedulerFactory.hpp"
 
-namespace sim
+#include <algorithm>
+#include <iostream>
+#include <utility>
+
+namespace sim {
+
+OperatingSystem::OperatingSystem(std::string schedulerType,
+                                 int quantumValue,
+                                 int numCpus,
+                                 std::vector<Task> initialTasks)
+    : tasks(std::move(initialTasks)),
+      quantum(quantumValue)
 {
-
-  OperatingSystem::OperatingSystem(std::string schedulerType,
-                                   int quantumValue,
-                                   int numCpus,
-                                   std::vector<Task> initialTasks)
-      : tasks(std::move(initialTasks)), currentIndex(0), quantum(quantumValue)
-  {
     clock.setTime(0);
 
-    // Creates CPUs
-    for (int i = 0; i < numCpus; i++)
-    {
-      cpus.emplace_back(i); // Adds CPU with id = i
-    }
+    if (numCpus < 2) numCpus = 2;  // Req geral 2: minimo 2 CPUs.
+    for (int i = 0; i < numCpus; ++i) cpus.emplace_back(i);
 
-    if (schedulerType == "SRTF")
-    {
-      scheduler = new SRTFScheduler();
+    // Factory plugavel (req 4.2). Se o nome nao for conhecido, faz fallback
+    // para SRTF e avisa no stderr. Nada de crash silencioso.
+    scheduler = SchedulerFactory::create(schedulerType);
+    if (!scheduler) {
+        std::cerr << "[OperatingSystem] Scheduler desconhecido '"
+                  << schedulerType << "', usando SRTF como padrao.\n";
+        scheduler = SchedulerFactory::create("SRTF");
+        schedulerName = "SRTF";
+    } else {
+        schedulerName = schedulerType;
     }
-    else if (schedulerType == "PRIOP")
-    {
-      scheduler = new PRIOpScheduler();
-    }
-    else
-    {
-      // If not defined, uses SRTF as default
-      scheduler = new SRTFScheduler();
-    }
+}
 
-    // Nao salva snapshot inicial — o primeiro snapshot vem do primeiro
-    // executeOneTick, ja com o resultado do primeiro dispatch. Salvar aqui
-    // duplicaria o tick 0 e desalinharia indices do historico do tempo real.
-  }
-
-  void OperatingSystem::admitArrivals()
-  {
-    for (int i = 0; i < this->tasks.size(); i++)
-    {
-      if (this->tasks[i].arrivalTime == clock.getTime())
-      {
-        this->tasks[i].state = TaskState::READY;
-      }
+// Promove tarefas NEW -> READY quando o instante de ingresso e' atingido.
+// Bug antes: comparava `arrivalTime == clock.getTime()`. Trocado por `<=`
+// (alem de checar o state) para suportar edicao manual de estado onde
+// uma tarefa pode "perder" o seu tick exato de admissao.
+void OperatingSystem::admitArrivals() {
+    int now = clock.getTime();
+    for (auto& t : tasks) {
+        if (t.state == TaskState::NEW && t.arrivalTime <= now) {
+            t.state = TaskState::READY;
+        }
     }
-  }
+}
 
-  Task *OperatingSystem::findTaskById(int id)
-  {
-    if (id == -1)
-      return nullptr;
-    for (auto &t : tasks)
-    {
-      if (t.id == id)
-        return &t;
+Task* OperatingSystem::findTaskById(int id) {
+    if (id == -1) return nullptr;
+    for (auto& t : tasks) {
+        if (t.id == id) return &t;
     }
     return nullptr;
-  }
+}
 
-  void OperatingSystem::handleRunningTasks()
-  {
-    for (int i = 0; i < this->cpus.size(); i++)
-    {
-      int taskId = cpus[i].currentTaskId;
-      Task *task = findTaskById(taskId);
-      if (!task)
-        continue;
-      task->remainingTime--;
-      cpus[i].currentQuantumTime++;
-      if (task->remainingTime <= 0) // Task terminated, free CPU
-      {
-        task->state = TaskState::TERMINATED;
-        this->cpus[i].currentTaskId = -1;
-        this->cpus[i].currentQuantumTime = 0;
-      }
+// "Trabalha" 1 tick em cada tarefa que esta RUNNING.
+// Decrementa remainingTime, conta quantum, lida com termino e preempcao.
+void OperatingSystem::handleRunningTasks() {
+    int now = clock.getTime();
 
-      // Quantum preemption, running task goes back to the ready queue
-      else if (cpus[i].currentQuantumTime >= this->quantum)
-      {
-        task->state = TaskState::READY;
-        this->cpus[i].currentTaskId = -1;
-        this->cpus[i].currentQuantumTime = 0;
-      }
+    for (auto& cpu : cpus) {
+        Task* task = findTaskById(cpu.currentTaskId);
+        if (!task) continue;
+
+        if (task->startTime < 0) task->startTime = now;  // Primeira execucao.
+        task->remainingTime--;
+        cpu.currentQuantumTime++;
+
+        if (task->remainingTime <= 0) {
+            // Tarefa terminou.
+            task->state = TaskState::TERMINATED;
+            task->finishTime = now + 1;   // Termina ao FIM deste tick.
+            task->cpuAssigned = -1;
+            cpu.currentTaskId = -1;
+            cpu.currentQuantumTime = 0;
+        } else if (cpu.currentQuantumTime >= quantum) {
+            // Quantum esgotado: volta para a fila de prontos.
+            task->state = TaskState::READY;
+            task->cpuAssigned = -1;
+            task->preemptions++;
+            cpu.currentTaskId = -1;
+            cpu.currentQuantumTime = 0;
+        }
     }
-  }
+}
 
-  std::vector<Task *> OperatingSystem::getReadyTasks()
-  {
-    std::vector<Task *> readyQueue;
-    for (int i = 0; i < this->tasks.size(); i++)
-    {
-      if (this->tasks[i].state == TaskState::READY)
-      {
-        readyQueue.push_back(&this->tasks[i]);
-      }
+// Mantem contadores de "tempo gasto esperando". Util para o relatorio
+// final e para a UI mostrar metricas por tarefa.
+void OperatingSystem::accumulateWaitMetrics() {
+    for (auto& t : tasks) {
+        if (t.state == TaskState::READY)     t.waitingTime++;
+        if (t.state == TaskState::SUSPENDED) t.suspendedTime++;
+    }
+}
+
+std::vector<Task*> OperatingSystem::getReadyTasks() {
+    std::vector<Task*> readyQueue;
+    for (auto& t : tasks) {
+        if (t.state == TaskState::READY) readyQueue.push_back(&t);
     }
     return readyQueue;
-  }
-
-  void OperatingSystem::dispatch()
-  {
-    if (!this->scheduler)
-      return;
-
-    std::vector<Task *> readyQueue = getReadyTasks();
-
-    for (int i = 0; i < cpus.size(); i++)
-    {
-      Task *runningTask = findTaskById(cpus[i].currentTaskId);
-      int currentTick = getCurrentTick();
-
-      Task *nextTask = this->scheduler->selectNextTask(readyQueue, runningTask, currentTick);
-      if (nextTask != nullptr)
-      {
-
-        if (nextTask != runningTask)
-        {
-          if (runningTask != nullptr)
-          {
-            // Place running task back to the ready queue as it won't run next cycle
-            runningTask->state = TaskState::READY;
-           
-            readyQueue.push_back(runningTask); //Place the preempted task back to the ready queue
-          }
-
-          this->cpus[i].currentTaskId = nextTask->id;
-          this->cpus[i].currentQuantumTime = 0;
-          nextTask->state = TaskState::RUNNING;
-        }
-        // Removes the now RUNNING tasks from the readyQueue
-        std::vector<sim::Task *>::iterator it = std::find(readyQueue.begin(), readyQueue.end(), nextTask);
-        if (it != readyQueue.end())
-        {
-          readyQueue.erase(it);
-        }
-      }
-      else
-      {
-        // Turns the CPU down (idle)
-        this->cpus[i].currentTaskId = -1;
-      }
-    }
-  }
-
-  void OperatingSystem::saveSnapshot()
-  {
-    if (!this->tasks.size() || !this->cpus.size())
-      return;
-    GlobalState globalState;
-    globalState.tick = getCurrentTick();
-
-    globalState.tasks = this->tasks;
-    globalState.cpus = this->cpus;
-
-    this->globalStates.push_back(globalState);
-  }
-
-  void OperatingSystem::executeOneTick()
-  {
-    admitArrivals();      // Admits the arrival of READY tasks
-    handleRunningTasks(); // CPU "works" on the running tasks in the current tick
-    dispatch();           // Select next tasks using the scheduler
-    saveSnapshot();       // Save current tick's state
-
-    this->clock.increment(); // Moves to next tick
-  }
-
-  bool OperatingSystem::isFinished() const
-  {
-    for (int i = 0; i < this->tasks.size(); i++)
-    {
-      if (this->tasks[i].state != TaskState::TERMINATED)
-        return false;
-    }
-    return true;
-  }
-
-  bool OperatingSystem::execute()
-  {
-    while (!isFinished())
-    {
-      this->executeOneTick();
-    }
-    return true;
-  }
-
-  const std::vector<GlobalState> &OperatingSystem::getSnapshotsHistory() const
-  {
-    return this->globalStates;
-  }
-
 }
+
+void OperatingSystem::dispatch() {
+    if (!scheduler) return;
+
+    // Limpa marcador de sorteio do tick anterior — o scheduler reativa
+    // se houver empate real neste tick. Sem isso, o icone "ficaria aceso"
+    // por toda a barra subsequente.
+    for (auto& t : tasks) t.wonByLottery = false;
+
+    std::vector<Task*> readyQueue = getReadyTasks();
+    int currentTick = getCurrentTick();
+
+    for (auto& cpu : cpus) {
+        Task* runningTask = findTaskById(cpu.currentTaskId);
+        Task* nextTask = scheduler->selectNextTask(readyQueue, runningTask, currentTick);
+
+        if (nextTask != nullptr) {
+            if (nextTask != runningTask) {
+                if (runningTask != nullptr) {
+                    runningTask->state = TaskState::READY;
+                    runningTask->cpuAssigned = -1;
+                    runningTask->preemptions++;
+                    readyQueue.push_back(runningTask);
+                }
+
+                cpu.currentTaskId = nextTask->id;
+                cpu.currentQuantumTime = 0;
+                nextTask->state = TaskState::RUNNING;
+                nextTask->cpuAssigned = cpu.id;
+            }
+
+            // Remove a tarefa selecionada da fila local para nao ser
+            // escolhida de novo por outra CPU.
+            auto it = std::find(readyQueue.begin(), readyQueue.end(), nextTask);
+            if (it != readyQueue.end()) readyQueue.erase(it);
+        } else {
+            // Sem tarefa elegivel: CPU "desligada" (req 1.2).
+            if (runningTask != nullptr) runningTask->cpuAssigned = -1;
+            cpu.currentTaskId = -1;
+            cpu.currentQuantumTime = 0;
+        }
+    }
+}
+
+void OperatingSystem::saveSnapshot() {
+    GlobalState snap;
+    snap.tick  = getCurrentTick();
+    snap.tasks = tasks;   // Copia profunda — historico imutavel.
+    snap.cpus  = cpus;
+    globalStates.push_back(std::move(snap));
+}
+
+bool OperatingSystem::executeOneTick() {
+    if (isFinished()) return false;
+
+    admitArrivals();
+    handleRunningTasks();
+    dispatch();
+    accumulateWaitMetrics();
+    saveSnapshot();
+
+    clock.increment();
+    return true;
+}
+
+bool OperatingSystem::isFinished() const {
+    for (const auto& t : tasks) {
+        if (t.state != TaskState::TERMINATED) return false;
+    }
+    return true;
+}
+
+bool OperatingSystem::execute() {
+    while (!isFinished()) executeOneTick();
+    return true;
+}
+
+bool OperatingSystem::setTaskState(int taskId, TaskState newState) {
+    Task* t = findTaskById(taskId);
+    if (!t) return false;
+
+    // Se a tarefa estava em uma CPU, libera a CPU.
+    if (t->cpuAssigned >= 0 && t->cpuAssigned < static_cast<int>(cpus.size())) {
+        cpus[t->cpuAssigned].currentTaskId = -1;
+        cpus[t->cpuAssigned].currentQuantumTime = 0;
+        t->cpuAssigned = -1;
+    }
+    t->state = newState;
+    return true;
+}
+
+const std::vector<GlobalState>& OperatingSystem::getSnapshotsHistory() const {
+    return globalStates;
+}
+
+}  // namespace sim
