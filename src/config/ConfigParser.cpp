@@ -3,6 +3,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <set>
 
 namespace {
 
@@ -60,6 +61,50 @@ int safeStoi(const std::string& s, int defaultValue) {
     }
 }
 
+// Converte um evento cru (ex: "ML01:5", "MU2:8", "IO:3-4") em uma TaskAction.
+// Retorna false se o formato nao for reconhecido — nesse caso o evento fica
+// apenas em rawEvents e nao gera efeito na simulacao.
+bool parseAction(std::string raw, sim::TaskAction& outAction) {
+    raw = trim(std::move(raw));
+    if (raw.size() < 3) return false;
+
+    std::string upper = toUpper(raw);
+
+    // IO:xx-yy
+    if (upper.rfind("IO:", 0) == 0) {
+        std::string rest = raw.substr(3);
+        auto dash = rest.find('-');
+        if (dash == std::string::npos) return false;
+        int t = safeStoi(rest.substr(0, dash), -1);
+        int d = safeStoi(rest.substr(dash + 1), -1);
+        if (t < 0 || d < 1) return false;    // Duracao minima = 1 (req 3.4).
+        outAction.type = sim::ActionType::IO;
+        outAction.relativeTime = t;
+        outAction.ioDuration = d;
+        outAction.mutexId = -1;
+        return true;
+    }
+
+    // MLxx:tt ou MUxx:tt
+    if (upper.rfind("ML", 0) == 0 || upper.rfind("MU", 0) == 0) {
+        bool lock = (upper.rfind("ML", 0) == 0);
+        std::string rest = raw.substr(2);
+        auto colon = rest.find(':');
+        if (colon == std::string::npos) return false;
+        int mid = safeStoi(rest.substr(0, colon), -1);
+        int t   = safeStoi(rest.substr(colon + 1), -1);
+        if (mid < 0 || t < 0) return false;
+        outAction.type = lock ? sim::ActionType::MUTEX_LOCK
+                              : sim::ActionType::MUTEX_UNLOCK;
+        outAction.relativeTime = t;
+        outAction.mutexId = mid;
+        outAction.ioDuration = 0;
+        return true;
+    }
+
+    return false;
+}
+
 }  // namespace
 
 namespace sim {
@@ -68,11 +113,13 @@ namespace sim {
 static const std::string DEFAULT_SCHEDULER = "SRTF";
 static const int DEFAULT_QUANTUM = 5;
 static const int DEFAULT_CPUS    = 2;
+static const int DEFAULT_ALPHA   = 0;
 
 bool ConfigParser::parse(const std::string& filename,
                          std::string& outSchedulerName,
                          int& outQuantum,
                          int& outNumCpus,
+                         int& outAlpha,
                          std::vector<Task>& outTasks)
 {
     // Antes de tudo, aplica defaults. Assim, qualquer campo faltante
@@ -80,6 +127,7 @@ bool ConfigParser::parse(const std::string& filename,
     outSchedulerName = DEFAULT_SCHEDULER;
     outQuantum       = DEFAULT_QUANTUM;
     outNumCpus       = DEFAULT_CPUS;
+    outAlpha         = DEFAULT_ALPHA;
     outTasks.clear();
 
     std::ifstream file(filename);
@@ -98,11 +146,16 @@ bool ConfigParser::parse(const std::string& filename,
         }
         if (std::getline(ss, token, ';')) outQuantum = safeStoi(token, DEFAULT_QUANTUM);
         if (std::getline(ss, token, ';')) outNumCpus = safeStoi(token, DEFAULT_CPUS);
+        // Quarto campo opcional: alpha do envelhecimento (req 1.1 do Projeto B).
+        if (std::getline(ss, token, ';')) outAlpha = safeStoi(token, DEFAULT_ALPHA);
     }
 
     // CPUs minimo 2 (req geral 2 do enunciado).
     if (outNumCpus < 2) outNumCpus = 2;
     if (outQuantum < 1) outQuantum = 1;
+    if (outAlpha   < 0) outAlpha   = 0;
+
+    std::set<int> usedIds;
 
     // ---- Demais linhas: uma tarefa por linha ----
     while (std::getline(file, line)) {
@@ -118,14 +171,25 @@ bool ConfigParser::parse(const std::string& filename,
         if (std::getline(ss, token, ';')) t.totalDuration = safeStoi(token, 1);
         if (std::getline(ss, token, ';')) t.staticPriority = safeStoi(token, 0);
 
+        if (!usedIds.insert(t.id).second) return false;
+        if (t.arrivalTime < 0) t.arrivalTime = 0;
+        if (t.totalDuration < 1) t.totalDuration = 1;
         t.remainingTime = t.totalDuration;
+        t.dynamicPriority = t.staticPriority;
 
         // Lista de eventos: tudo o que vier depois da prioridade.
-        // Cada campo separado por ';' vira um evento bruto (tratado no Projeto B).
-        // Guardar agora ja prepara o terreno e respeita req 3.3.3.
+        // Guardamos a string original (rawEvents) e tambem tentamos parsear
+        // como TaskAction (Projeto B). Eventos com formato invalido ficam
+        // apenas em rawEvents e nao geram efeito na simulacao.
         while (std::getline(ss, token, ';')) {
             std::string ev = trim(token);
-            if (!ev.empty()) t.rawEvents.push_back(toUpper(ev));
+            if (ev.empty()) continue;
+            std::string evUpper = toUpper(ev);
+            t.rawEvents.push_back(evUpper);
+            TaskAction action;
+            if (parseAction(ev, action)) {
+                t.actions.push_back(action);
+            }
         }
 
         outTasks.push_back(std::move(t));

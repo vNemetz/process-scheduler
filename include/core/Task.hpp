@@ -1,6 +1,7 @@
 #pragma once
 
 #include <SFML/Graphics/Color.hpp>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,22 @@ enum class SuspendReason {
     MUTEX        // Esperando um mutex
 };
 
+// Acoes que uma tarefa executa durante sua vida (Projeto B).
+// Sao lidas do arquivo de configuracao no formato:
+//   ML01:5  -> tenta lock do mutex 1 no tick relativo 5
+//   MU01:8  -> libera o mutex 1 no tick relativo 8
+//   IO:3-4  -> comeca I/O no tick relativo 3, dura 4 unidades
+// O "tick relativo" e' o tempo que a tarefa esteve efetivamente em CPU
+// (cpuTimeConsumed), nao o tempo global do sistema.
+enum class ActionType { MUTEX_LOCK, MUTEX_UNLOCK, IO };
+
+struct TaskAction {
+    ActionType type;
+    int relativeTime;   // Momento de disparo (em cpuTimeConsumed).
+    int mutexId;        // Para MUTEX_LOCK / MUTEX_UNLOCK.
+    int ioDuration;     // Para IO.
+};
+
 // TCB (Task Control Block) — concentra TODAS as informacoes da tarefa
 // antes, durante e depois da simulacao (requisito 1.3 do enunciado).
 struct Task {
@@ -40,8 +57,9 @@ struct Task {
     sf::Color color;
     int arrivalTime;
     int totalDuration;
-    int staticPriority;          // Usado pelo PRIOp
-    std::vector<std::string> rawEvents;  // Reservado para Projeto B (mutex/IO)
+    int staticPriority;          // Usado pelo PRIOp / PRIOPEnv
+    std::vector<std::string> rawEvents;   // Lista original (util para relatorio).
+    std::vector<TaskAction>   actions;    // Lista parseada (usada em runtime).
 
     // ---- Estado em tempo de simulacao ----
     TaskState state = TaskState::NEW;
@@ -49,6 +67,16 @@ struct Task {
     int remainingTime;
     int cpuAssigned = -1;        // -1 = nao esta em CPU
     int quantumTicksLeft = 0;
+
+    // Tempo total (em ticks) em que a tarefa esteve em RUNNING.
+    // Serve de "relogio local" para disparar as acoes de mutex/IO
+    // (req 2.4 e 3.3 da parte B: instantes relativos ao inicio da tarefa).
+    int cpuTimeConsumed = 0;
+    std::size_t nextActionIndex = 0;
+
+    // Prioridade dinamica usada pelo PRIOPEnv (envelhecimento).
+    // Inicia igual a staticPriority; o OS atualiza a cada tick.
+    int dynamicPriority = 0;
 
     // Sinaliza, durante UM tick, que esta tarefa venceu o desempate por
     // sorteio (criterio 4 da req 4.3). A UI usa isso para desenhar um
@@ -76,7 +104,8 @@ struct Task {
           totalDuration(_duration),
           staticPriority(_priority),
           rawEvents(std::move(_events)),
-          remainingTime(_duration)
+          remainingTime(_duration),
+          dynamicPriority(_priority)
     {}
 
     bool isRunning()    const { return state == TaskState::RUNNING; }

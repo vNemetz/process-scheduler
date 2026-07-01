@@ -54,12 +54,14 @@ private:
     sim::OperatingSystem* os;
     std::map<int, sf::Color> taskColors;
     std::map<int, sim::Task> initialTasksById;  // Para mostrar "ingresso" mesmo apos consumo
+    std::map<int, int> taskRows;
     int maxTaskId;
 
     // ---- Estado da UI ----
     int currentTimeIndex;     // Posicao no historico (0 = tick 0)
     UIMode mode;
     bool isPlaying;           // Auto-play ligado?
+    bool showHelp;            // Overlay F1 visivel?
     int  framesPerStep;       // No auto-play, 1 step a cada N frames
     int  frameCounter;        // Contador do auto-play
     int  selectedTaskId;      // Tarefa selecionada para edicao (-1 = nenhuma)
@@ -88,6 +90,7 @@ private:
     void updateViewWindow();     // Faz scroll horizontal pra acompanhar cursor
 
     bool atLiveTick() const;     // currentTimeIndex == ultimo do historico?
+    int rowForTask(int taskId) const;
     const sim::GlobalState* currentSnapshot() const;
     void setStatus(const std::string& msg);
 
@@ -95,6 +98,8 @@ private:
     void drawTopBar(sf::RenderTarget& t);
     void drawBotBar(sf::RenderTarget& t);
     void drawSideBar(sf::RenderTarget& t);
+    void drawCpuStatus(sf::RenderTarget& t, float& y, const sim::GlobalState* snap);
+    void drawHelpOverlay(sf::RenderTarget& t);
     void drawGantt(sf::RenderTarget& t, const PlotArea& p, bool drawCursor);
     void drawGrid(sf::RenderTarget& t, const PlotArea& p, int xTicks, int yTicks);
     void drawAxes(sf::RenderTarget& t, const PlotArea& p);
@@ -106,13 +111,16 @@ private:
                    int tick, int taskId, int cpuId,
                    const sf::Color& color, bool isLottery);
     void drawSuspendedBlock(sf::RenderTarget& t, const PlotArea& p,
-                            int tick, int taskId);
+                            int tick, int taskId, sim::SuspendReason reason);
     void drawReadySlot(sf::RenderTarget& t, const PlotArea& p,
                        int tick, int taskId);
     void drawArrivalIcon(sf::RenderTarget& t, const PlotArea& p,
                          int tick, int taskId);
     void drawTerminationIcon(sf::RenderTarget& t, const PlotArea& p,
                              int tick, int taskId);
+    // Marcadores das acoes de mutex/IO no bloco correspondente (Projeto B).
+    void drawActionMarker(sf::RenderTarget& t, const PlotArea& p,
+                          int tick, int taskId, const sim::ActionEvent& ev);
 
     // PNG export = renderiza para uma RenderTexture sem janela visivel.
     void renderGanttToTarget(sf::RenderTarget& t, const PlotArea& p, int firstTick, int lastTick);

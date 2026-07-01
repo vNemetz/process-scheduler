@@ -30,6 +30,14 @@ static const sf::Color TEXT_COLOR      (220, 220, 230);
 static const sf::Color TEXT_DIM        (150, 152, 165);
 static const sf::Color CURSOR_COLOR    (255, 215, 0);
 static const sf::Color SUSPENDED_COLOR (15, 15, 18);     // Preto p/ suspensa (req 2.1)
+// Cores auxiliares para diferenciar SUSPENDED por I/O vs MUTEX (req 2.9/3.8).
+// Mantemos o preto como base e sobrepomos um padrao/faixa colorida para
+// distinguir os dois casos sem afastar do requisito 2.1 (preto = suspensa).
+static const sf::Color SUSPENDED_IO_STRIPE    ( 60, 130, 220);  // Azul (I/O)
+static const sf::Color SUSPENDED_MUTEX_STRIPE (220,  80,  80);  // Vermelho (MUTEX)
+static const sf::Color MUTEX_LOCK_COLOR       (245, 200,  60);  // Amarelo (lock)
+static const sf::Color MUTEX_UNLOCK_COLOR     ( 90, 200, 120);  // Verde   (unlock)
+static const sf::Color IO_ICON_COLOR          ( 60, 130, 220);  // Azul   (IO)
 static const sf::Color READY_BORDER    (120, 130, 150);
 
 // --------------------------------------------------------------------------
@@ -44,6 +52,7 @@ UIController::UIController(sim::OperatingSystem* osPtr,
       currentTimeIndex(0),
       mode(UIMode::STEP),
       isPlaying(false),
+      showHelp(false),
       framesPerStep(AUTO_FRAMES_STEP),
       frameCounter(0),
       selectedTaskId(-1),
@@ -64,6 +73,11 @@ UIController::UIController(sim::OperatingSystem* osPtr,
         if (t.id > maxTaskId) maxTaskId = t.id;
     }
 
+    int row = 1;
+    for (const auto& kv : taskColors) {
+        taskRows[kv.first] = row++;
+    }
+
     // Define as areas da tela. Gantt fica entre a top bar e a bot bar,
     // com a sideBar a direita. SIDE_W controla a largura do painel lateral.
     topBar  = { 0.0f,         0.0f,                          (float)WINDOW_W, TOP_H };
@@ -79,7 +93,7 @@ UIController::UIController(sim::OperatingSystem* osPtr,
     gantt = {
         { ganttX, ganttY, ganttW, ganttH },
         0.0f, 10.0f,
-        0.0f, (float)(maxTaskId + 1)
+        0.0f, (float)(taskRows.size() + 1)
     };
 
     setStatus("Pronto. F1 = ajuda.");
@@ -116,6 +130,10 @@ void UIController::processEvents() {
 
         switch (event.key.code) {
             case sf::Keyboard::Escape: window.close();             break;
+            case sf::Keyboard::F1:
+                showHelp = !showHelp;
+                setStatus(showHelp ? "Ajuda aberta." : "Ajuda fechada.");
+                break;
             case sf::Keyboard::Right:  stepForward();               break;
             case sf::Keyboard::Left:   stepBackward();              break;
             case sf::Keyboard::Space:  togglePlay();                break;
@@ -125,28 +143,39 @@ void UIController::processEvents() {
             case sf::Keyboard::P:      exportPng();                 break;
             case sf::Keyboard::R:      resetSimulation();           break;
             case sf::Keyboard::S:
-                // Suspende a tarefa selecionada (apenas no live).
-                if (selectedTaskId >= 0 && atLiveTick()) {
-                    if (os->setTaskState(selectedTaskId, sim::TaskState::SUSPENDED))
-                        setStatus("T" + std::to_string(selectedTaskId) + " -> SUSPENDED");
+                if (selectedTaskId >= 0 && currentSnapshot()) {
+                    if (os->setTaskState(selectedTaskId, sim::TaskState::SUSPENDED)) {
+                        os->updateCurrentSnapshot();
+                        os->truncateHistoryAfterCurrentTick();
+                        currentTimeIndex = static_cast<int>(os->getSnapshotsHistory().size()) - 1;
+                        setStatus("T" + std::to_string(selectedTaskId) + " -> SUSPENDED; futuro recalculavel.");
+                    }
                 } else {
-                    setStatus("Edicao so vale no tick atual (END).");
+                    setStatus("Selecione uma tarefa e avance ate um tick valido.");
                 }
                 break;
             case sf::Keyboard::D:
-                // Re-disponibiliza (acorda) a tarefa selecionada.
-                if (selectedTaskId >= 0 && atLiveTick()) {
-                    if (os->setTaskState(selectedTaskId, sim::TaskState::READY))
-                        setStatus("T" + std::to_string(selectedTaskId) + " -> READY");
+                if (selectedTaskId >= 0 && currentSnapshot()) {
+                    if (os->setTaskState(selectedTaskId, sim::TaskState::READY)) {
+                        os->updateCurrentSnapshot();
+                        os->truncateHistoryAfterCurrentTick();
+                        currentTimeIndex = static_cast<int>(os->getSnapshotsHistory().size()) - 1;
+                        setStatus("T" + std::to_string(selectedTaskId) + " -> READY; futuro recalculavel.");
+                    }
                 } else {
-                    setStatus("Edicao so vale no tick atual (END).");
+                    setStatus("Selecione uma tarefa e avance ate um tick valido.");
                 }
                 break;
             case sf::Keyboard::T:
-                // Forca o termino. Util para "matar" tarefas no debug.
-                if (selectedTaskId >= 0 && atLiveTick()) {
-                    if (os->setTaskState(selectedTaskId, sim::TaskState::TERMINATED))
-                        setStatus("T" + std::to_string(selectedTaskId) + " -> TERMINATED");
+                if (selectedTaskId >= 0 && currentSnapshot()) {
+                    if (os->setTaskState(selectedTaskId, sim::TaskState::TERMINATED)) {
+                        os->updateCurrentSnapshot();
+                        os->truncateHistoryAfterCurrentTick();
+                        currentTimeIndex = static_cast<int>(os->getSnapshotsHistory().size()) - 1;
+                        setStatus("T" + std::to_string(selectedTaskId) + " -> TERMINATED; futuro recalculavel.");
+                    }
+                } else {
+                    setStatus("Selecione uma tarefa e avance ate um tick valido.");
                 }
                 break;
             default: break;
@@ -183,12 +212,13 @@ void UIController::update() {
 void UIController::stepForward() {
     int last = static_cast<int>(os->getSnapshotsHistory().size()) - 1;
     if (currentTimeIndex < last) {
-        // Ja temos historico — so navega.
         currentTimeIndex++;
+        os->restoreSnapshot(static_cast<std::size_t>(currentTimeIndex));
+        setStatus("Tick restaurado: " + std::to_string(currentTimeIndex));
     } else {
-        // No live: pede mais 1 tick ao SO. Se ja terminou, nada acontece.
         if (os->executeOneTick()) {
             currentTimeIndex = static_cast<int>(os->getSnapshotsHistory().size()) - 1;
+            setStatus("Tick executado: " + std::to_string(currentTimeIndex));
         } else {
             setStatus("Simulacao ja terminou.");
         }
@@ -196,15 +226,25 @@ void UIController::stepForward() {
 }
 
 void UIController::stepBackward() {
-    if (currentTimeIndex > 0) currentTimeIndex--;
+    if (currentTimeIndex > 0) {
+        currentTimeIndex--;
+        os->restoreSnapshot(static_cast<std::size_t>(currentTimeIndex));
+        setStatus("Tick restaurado: " + std::to_string(currentTimeIndex));
+    }
 }
 
 void UIController::runToEnd() {
-    // Roda em batch ate o fim — implementacao real do modo "completo" (req 1.5.b).
+    int last = static_cast<int>(os->getSnapshotsHistory().size()) - 1;
+    if (currentTimeIndex < last) {
+        currentTimeIndex = last;
+        os->restoreSnapshot(static_cast<std::size_t>(currentTimeIndex));
+    }
+
     while (!os->isFinished()) os->executeOneTick();
     currentTimeIndex = static_cast<int>(os->getSnapshotsHistory().size()) - 1;
     isPlaying = false;
-    setStatus("Avancado ate o fim.");
+    exportPng();
+    setStatus("Avancado ate o fim. gantt.png atualizado.");
 }
 
 void UIController::togglePlay() {
@@ -215,19 +255,23 @@ void UIController::togglePlay() {
 
 void UIController::goToStart() {
     currentTimeIndex = 0;
-    setStatus("Cursor no inicio.");
+    os->restoreSnapshot(0);
+    setStatus("Tick inicial restaurado.");
 }
 
 void UIController::goToEnd() {
     int last = static_cast<int>(os->getSnapshotsHistory().size()) - 1;
     if (last < 0) last = 0;
     currentTimeIndex = last;
+    if (!os->getSnapshotsHistory().empty()) os->restoreSnapshot(static_cast<std::size_t>(currentTimeIndex));
+    setStatus("Ultimo tick restaurado.");
 }
 
 void UIController::resetSimulation() {
     currentTimeIndex = 0;
     isPlaying = false;
-    setStatus("Cursor resetado (historico mantido).");
+    os->restoreSnapshot(0);
+    setStatus("Tick inicial restaurado (historico mantido).");
 }
 
 // --------------------------------------------------------------------------
@@ -243,6 +287,12 @@ void UIController::selectTaskByDigit(int digit) {
 bool UIController::atLiveTick() const {
     int last = static_cast<int>(os->getSnapshotsHistory().size()) - 1;
     return currentTimeIndex == last;
+}
+
+int UIController::rowForTask(int taskId) const {
+    auto it = taskRows.find(taskId);
+    if (it == taskRows.end()) return taskId;
+    return it->second;
 }
 
 const sim::GlobalState* UIController::currentSnapshot() const {
@@ -272,10 +322,14 @@ void UIController::exportPng() {
     }
 
     int totalTicks = static_cast<int>(history.size());
+    for (const auto& t : os->getTasks()) {
+        if (t.finishTime > totalTicks) totalTicks = t.finishTime;
+    }
+    if (totalTicks <= 0) totalTicks = 1;
     // Largura proporcional aos ticks para nao ficar comprimido.
     int pxPerTick = 24;
     int imgW = std::max(800, 80 + totalTicks * pxPerTick + 20);
-    int imgH = 80 + (maxTaskId + 1) * 50;
+    int imgH = 80 + (static_cast<int>(taskRows.size()) + 1) * 50;
 
     sf::RenderTexture texture;
     if (!texture.create(imgW, imgH)) {
@@ -286,7 +340,7 @@ void UIController::exportPng() {
     PlotArea exportPlot = {
         { 60.f, 40.f, (float)imgW - 80.f, (float)imgH - 80.f },
         0.0f, (float)totalTicks,
-        0.0f, (float)(maxTaskId + 1)
+        0.0f, (float)(static_cast<int>(taskRows.size()) + 1)
     };
 
     texture.clear(sf::Color::White);
@@ -296,7 +350,7 @@ void UIController::exportPng() {
     // visualmente com o que o usuario viu na tela.
     texture.clear(BG_COLOR);
 
-    drawGrid(texture, exportPlot, totalTicks, maxTaskId + 1);
+    drawGrid(texture, exportPlot, totalTicks, static_cast<int>(taskRows.size()) + 1);
     drawAxes(texture, exportPlot);
     drawLabels(texture, exportPlot);
     renderGanttToTarget(texture, exportPlot, 0, totalTicks - 1);
@@ -322,12 +376,13 @@ void UIController::render() {
     updateViewWindow();
 
     drawTopBar(window);
-    drawGrid(window, gantt, (int)(gantt.xmax - gantt.xmin), maxTaskId + 1);
+    drawGrid(window, gantt, (int)(gantt.xmax - gantt.xmin), static_cast<int>(taskRows.size()) + 1);
     drawAxes(window, gantt);
     drawLabels(window, gantt);
     drawGantt(window, gantt, /*drawCursor=*/true);
     drawSideBar(window);
     drawBotBar(window);
+    if (showHelp) drawHelpOverlay(window);
 
     window.display();
 }
@@ -408,7 +463,7 @@ void UIController::drawBotBar(sf::RenderTarget& target) {
 
     const char* lines[] = {
         "[->] Passo a frente   [<-] Passo atras   [Espaco] Play/Pause   [A] Avancar ate fim   [Home/End] Inicio/Fim",
-        "[1..9] Selecionar tarefa   [S] Suspender   [D] Liberar (READY)   [T] Terminar   [P] Exportar PNG   [R] Reset cursor   [Esc] Sair"
+        "[1..9] Selecionar tarefa   [S] Suspender   [D] Liberar   [T] Terminar   [P] PNG   [F1] Ajuda   [Esc] Sair"
     };
 
     txt.setString(lines[0]);
@@ -453,6 +508,8 @@ void UIController::drawSideBar(sf::RenderTarget& target) {
     const sim::GlobalState* snap = currentSnapshot();
 
     float y = sideBar.top + 40.f;
+    drawCpuStatus(target, y, snap);
+
     for (auto& kv : initialTasksById) {
         int id = kv.first;
         const sim::Task& initialT = kv.second;
@@ -539,6 +596,79 @@ void UIController::drawSideBar(sf::RenderTarget& target) {
     }
 }
 
+void UIController::drawCpuStatus(sf::RenderTarget& target, float& y, const sim::GlobalState* snap) {
+    sf::Text txt;
+    txt.setFont(font);
+    txt.setFillColor(TEXT_COLOR);
+    txt.setCharacterSize(13);
+    txt.setStyle(sf::Text::Bold);
+    txt.setString("CPUs no tick selecionado");
+    txt.setPosition(sideBar.left + 12.f, y);
+    target.draw(txt);
+    txt.setStyle(sf::Text::Regular);
+
+    y += 22.f;
+    const auto& cpus = snap ? snap->cpus : os->getCpus();
+    for (const auto& cpu : cpus) {
+        std::ostringstream oss;
+        oss << "CPU" << cpu.id << ": ";
+        if (cpu.isRunning()) {
+            oss << "T" << cpu.currentTaskId;
+            txt.setFillColor(TEXT_COLOR);
+        } else {
+            oss << "OFF";
+            txt.setFillColor(sf::Color(245, 120, 120));
+        }
+        txt.setString(oss.str());
+        txt.setPosition(sideBar.left + 20.f, y);
+        target.draw(txt);
+        y += 18.f;
+    }
+
+    txt.setFillColor(TEXT_DIM);
+    txt.setString("OFF = sem tarefa pronta para ocupar a CPU");
+    txt.setPosition(sideBar.left + 20.f, y);
+    target.draw(txt);
+    y += 28.f;
+}
+
+void UIController::drawHelpOverlay(sf::RenderTarget& target) {
+    sf::RectangleShape dim({(float)WINDOW_W, (float)WINDOW_H});
+    dim.setFillColor(sf::Color(0, 0, 0, 170));
+    target.draw(dim);
+
+    sf::RectangleShape panel({760.f, 420.f});
+    panel.setPosition((WINDOW_W - 760.f) / 2.f, (WINDOW_H - 420.f) / 2.f);
+    panel.setFillColor(sf::Color(35, 39, 52));
+    panel.setOutlineThickness(2.f);
+    panel.setOutlineColor(CURSOR_COLOR);
+    target.draw(panel);
+
+    sf::Text txt;
+    txt.setFont(font);
+    txt.setFillColor(TEXT_COLOR);
+    txt.setCharacterSize(15);
+    txt.setPosition(panel.getPosition().x + 24.f, panel.getPosition().y + 22.f);
+    txt.setString(
+        "Ajuda do Simulador - Projetos A e B\n\n"
+        "Modos:\n"
+        "  step: setas avancam/retrocedem snapshots e restauram o relogio global.\n"
+        "  auto/A: executa ate o fim e gera gantt.png automaticamente.\n\n"
+        "Teclas:\n"
+        "  -> / <-: avanca ou retrocede um tick\n"
+        "  Espaco: play/pause    A: ate o fim    Home/End: inicio/fim\n"
+        "  1..9: seleciona tarefa    S: suspende    D: pronta    T: termina\n"
+        "  P: exporta gantt.png    R: volta ao inicio do historico    F1: ajuda\n\n"
+        "Gantt:\n"
+        "  bloco colorido = RUNNING; borda sem cor = READY;\n"
+        "  preto = SUSPENDED (listras azuis = I/O; xadrez vermelho = MUTEX)\n"
+        "  triangulo verde = chegada; X vermelho = termino; estrela = sorteio\n"
+        "  quadrado amarelo = ML (lock); quadrado verde = MU (unlock);\n"
+        "  losango azul = IO; CPU OFF indica processador desligado."
+    );
+    target.draw(txt);
+}
+
 // --------------------------------------------------------------------------
 // Gantt
 // --------------------------------------------------------------------------
@@ -575,13 +705,6 @@ void UIController::renderGanttToTarget(sf::RenderTarget& target, const PlotArea&
 {
     const auto& history = os->getSnapshotsHistory();
 
-    // Para localizar chegadas e terminos, vamos comparar estado em t e em t-1.
-    auto stateOf = [&](int tick, int taskId) -> sim::TaskState {
-        if (tick < 0 || tick >= (int)history.size()) return sim::TaskState::NEW;
-        for (const auto& t : history[tick].tasks) if (t.id == taskId) return t.state;
-        return sim::TaskState::NEW;
-    };
-
     for (int t = firstTick; t <= lastTick; ++t) {
         const sim::GlobalState& state = history[t];
 
@@ -602,21 +725,29 @@ void UIController::renderGanttToTarget(sf::RenderTarget& target, const PlotArea&
                     drawReadySlot(target, p, t, id);
                     break;
                 case sim::TaskState::SUSPENDED:
-                    drawSuspendedBlock(target, p, t, id);
+                    drawSuspendedBlock(target, p, t, id, task.suspendReason);
                     break;
                 default: break;  // NEW (ainda nao chegou) e TERMINATED nao desenham bloco
             }
 
-            // Icone de chegada: a tarefa deixou de ser NEW exatamente neste tick.
-            sim::TaskState prev = stateOf(t - 1, id);
-            if (prev == sim::TaskState::NEW && task.state != sim::TaskState::NEW) {
+            if (task.arrivalTime == t) {
                 drawArrivalIcon(target, p, t, id);
             }
 
-            // Icone de termino: a tarefa entrou em TERMINATED neste tick.
-            if (prev != sim::TaskState::TERMINATED && task.state == sim::TaskState::TERMINATED) {
+            if (task.finishTime == t) {
                 drawTerminationIcon(target, p, t, id);
             }
+        }
+
+        // Marcadores das acoes ML/MU/IO disparadas neste tick (Projeto B).
+        for (const auto& ev : state.tickActions) {
+            drawActionMarker(target, p, t, ev.taskId, ev);
+        }
+    }
+
+    for (const auto& task : os->getTasks()) {
+        if (task.finishTime == lastTick + 1) {
+            drawTerminationIcon(target, p, task.finishTime, task.id);
         }
     }
 }
@@ -626,7 +757,7 @@ void UIController::drawBlock(sf::RenderTarget& target, const PlotArea& p,
                              int tick, int taskId, int cpuId,
                              const sf::Color& color, bool isLottery)
 {
-    float y = (float)taskId;
+    float y = static_cast<float>(rowForTask(taskId));
     sf::Vector2f bl = mapToScreen((float)tick,     y - 0.4f, p);
     sf::Vector2f tr = mapToScreen((float)(tick+1), y + 0.4f, p);
 
@@ -666,11 +797,13 @@ void UIController::drawBlock(sf::RenderTarget& target, const PlotArea& p,
     }
 }
 
-// Bloco SUSPENDED — preto, conforme req 2.1.
+// Bloco SUSPENDED — preto base + padrao distinto por motivo (req 2.9/3.8).
+//   IO   : listras horizontais azuis
+//   MUTEX: listras diagonais vermelhas (padrao "xadrez" aproximado)
 void UIController::drawSuspendedBlock(sf::RenderTarget& target, const PlotArea& p,
-                                      int tick, int taskId)
+                                      int tick, int taskId, sim::SuspendReason reason)
 {
-    float y = (float)taskId;
+    float y = static_cast<float>(rowForTask(taskId));
     sf::Vector2f bl = mapToScreen((float)tick,     y - 0.4f, p);
     sf::Vector2f tr = mapToScreen((float)(tick+1), y + 0.4f, p);
     float w = tr.x - bl.x;
@@ -682,6 +815,31 @@ void UIController::drawSuspendedBlock(sf::RenderTarget& target, const PlotArea& 
     rect.setOutlineThickness(1.f);
     rect.setOutlineColor(sf::Color(80, 80, 80));
     target.draw(rect);
+
+    if (reason == sim::SuspendReason::IO) {
+        // Listras horizontais azuis, espacadas.
+        sf::Color stripe = SUSPENDED_IO_STRIPE;
+        int stripeH = 2;
+        for (float sy = tr.y + 3; sy < bl.y - 3; sy += 6) {
+            sf::RectangleShape s({w - 4.f, (float)stripeH});
+            s.setPosition(bl.x + 2.f, sy);
+            s.setFillColor(stripe);
+            target.draw(s);
+        }
+    } else if (reason == sim::SuspendReason::MUTEX) {
+        // Quadriculado simples vermelho.
+        sf::Color check = SUSPENDED_MUTEX_STRIPE;
+        int step = 4;
+        for (int oy = 3; oy < (int)h - 3; oy += step) {
+            for (int ox = ((oy / step) % 2) ? 3 : 3 + step / 2;
+                 ox < (int)w - 3; ox += step) {
+                sf::RectangleShape s({2.f, 2.f});
+                s.setPosition(bl.x + ox, tr.y + oy);
+                s.setFillColor(check);
+                target.draw(s);
+            }
+        }
+    }
 }
 
 // READY: ausencia de cor (req 2.1), mas mostramos um retangulo so com borda
@@ -689,7 +847,7 @@ void UIController::drawSuspendedBlock(sf::RenderTarget& target, const PlotArea& 
 void UIController::drawReadySlot(sf::RenderTarget& target, const PlotArea& p,
                                  int tick, int taskId)
 {
-    float y = (float)taskId;
+    float y = static_cast<float>(rowForTask(taskId));
     sf::Vector2f bl = mapToScreen((float)tick,     y - 0.4f, p);
     sf::Vector2f tr = mapToScreen((float)(tick+1), y + 0.4f, p);
     float w = tr.x - bl.x;
@@ -707,7 +865,7 @@ void UIController::drawReadySlot(sf::RenderTarget& target, const PlotArea& p,
 void UIController::drawArrivalIcon(sf::RenderTarget& target, const PlotArea& p,
                                    int tick, int taskId)
 {
-    float y = (float)taskId;
+    float y = static_cast<float>(rowForTask(taskId));
     sf::Vector2f base = mapToScreen((float)tick, y - 0.4f, p);
 
     sf::ConvexShape tri;
@@ -722,11 +880,64 @@ void UIController::drawArrivalIcon(sf::RenderTarget& target, const PlotArea& p,
     target.draw(tri);
 }
 
+// Marcador colorido no bloco da tarefa indicando a acao disparada:
+//   MUTEX_LOCK   -> quadrado amarelo (cadeado fechado)
+//   MUTEX_UNLOCK -> quadrado verde   (cadeado aberto)
+//   IO           -> losango azul
+// Desenhado no canto inferior direito do bloco para nao conflitar com o
+// marcador de sorteio (canto superior esquerdo).
+void UIController::drawActionMarker(sf::RenderTarget& target, const PlotArea& p,
+                                    int tick, int taskId, const sim::ActionEvent& ev)
+{
+    float y = static_cast<float>(rowForTask(taskId));
+    sf::Vector2f bl = mapToScreen((float)tick,     y - 0.4f, p);
+    sf::Vector2f tr = mapToScreen((float)(tick+1), y + 0.4f, p);
+    float w = tr.x - bl.x;
+
+    float cx = bl.x + w - 8.f;
+    float cy = bl.y - 8.f;
+
+    switch (ev.type) {
+        case sim::ActionType::MUTEX_LOCK: {
+            sf::RectangleShape r({8.f, 8.f});
+            r.setPosition(cx, cy);
+            r.setFillColor(MUTEX_LOCK_COLOR);
+            r.setOutlineThickness(1.f);
+            r.setOutlineColor(sf::Color::Black);
+            target.draw(r);
+            break;
+        }
+        case sim::ActionType::MUTEX_UNLOCK: {
+            sf::RectangleShape r({8.f, 8.f});
+            r.setPosition(cx, cy);
+            r.setFillColor(MUTEX_UNLOCK_COLOR);
+            r.setOutlineThickness(1.f);
+            r.setOutlineColor(sf::Color::Black);
+            target.draw(r);
+            break;
+        }
+        case sim::ActionType::IO: {
+            sf::ConvexShape diamond;
+            diamond.setPointCount(4);
+            diamond.setPoint(0, { 4.f,  0.f});
+            diamond.setPoint(1, { 8.f,  4.f});
+            diamond.setPoint(2, { 4.f,  8.f});
+            diamond.setPoint(3, { 0.f,  4.f});
+            diamond.setFillColor(IO_ICON_COLOR);
+            diamond.setOutlineThickness(1.f);
+            diamond.setOutlineColor(sf::Color::Black);
+            diamond.setPosition(cx, cy);
+            target.draw(diamond);
+            break;
+        }
+    }
+}
+
 // "X" vermelho no canto direito da ultima celula em que a tarefa rodou.
 void UIController::drawTerminationIcon(sf::RenderTarget& target, const PlotArea& p,
                                        int tick, int taskId)
 {
-    float y = (float)taskId;
+    float y = static_cast<float>(rowForTask(taskId));
     sf::Vector2f anchor = mapToScreen((float)tick, y + 0.4f, p);
 
     sf::Color red(230, 60, 60);
@@ -790,10 +1001,10 @@ void UIController::drawLabels(sf::RenderTarget& target, const PlotArea& p) {
         target.draw(txt);
     }
 
-    for (auto& kv : taskColors) {
+    for (auto& kv : taskRows) {
         int id = kv.first;
         txt.setString("T" + std::to_string(id));
-        sf::Vector2f pos = mapToScreen(p.xmin, (float)id, p);
+        sf::Vector2f pos = mapToScreen(p.xmin, static_cast<float>(kv.second), p);
         auto b = txt.getLocalBounds();
         txt.setPosition(pos.x - b.width - 8.f, pos.y - b.height);
         target.draw(txt);
@@ -833,7 +1044,13 @@ void UIController::drawLegendInsideGantt(sf::RenderTarget& target, const PlotAre
     entry(sf::Color(120, 160, 220), "RUNNING");
     entry(sf::Color::Transparent,   "READY (so borda)");
     entry(SUSPENDED_COLOR,          "SUSPENDED");
+    entry(SUSPENDED_IO_STRIPE,      "SUSP-IO");
+    entry(SUSPENDED_MUTEX_STRIPE,   "SUSP-MUTEX");
+    entry(MUTEX_LOCK_COLOR,         "ML (lock)");
+    entry(MUTEX_UNLOCK_COLOR,       "MU (unlock)");
+    entry(IO_ICON_COLOR,            "IO");
     entry(CURSOR_COLOR,             "Sorteio");
+    entry(sf::Color(245, 120, 120), "CPU OFF");
 }
 
 }  // namespace view
