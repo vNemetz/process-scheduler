@@ -10,6 +10,7 @@
 #include "config/ConfigParser.hpp"
 #include "core/OperatingSystem.hpp"
 #include "scheduler/SchedulerFactory.hpp"
+#include "view/ConfigMenu.hpp"
 #include "view/GanttExporter.hpp"
 #include "view/UIController.hpp"
 
@@ -79,24 +80,30 @@ static void printReport(const sim::OperatingSystem& os, const std::string& confi
 
 static void printUsage(const char* progName) {
     std::cout << "Uso: " << progName << " [opcoes]\n"
-              << "  --config=<path>      Arquivo de configuracao (default: ../config/config.txt)\n"
+              << "  --config=<path>      Arquivo de configuracao (pula o menu de selecao)\n"
+              << "  --menu               Forca abertura do menu SFML de selecao\n"
+              << "  --config-dir=<path>  Pasta da biblioteca de configs (default: ../config)\n"
               << "  --mode=<auto|step>   Modo de execucao (case-insensitive, default: step)\n"
               << "                         auto: simula tudo e mostra resultado final\n"
               << "                         step: UI controla cada tick (debugger)\n"
               << "  --no-gui             Roda em modo auto sem abrir janela e gera gantt.png\n"
               << "  --list-schedulers    Lista escalonadores registrados\n"
               << "  -h, --help           Mostra esta ajuda\n\n"
+              << "Sem --config nem --no-gui, abre um menu grafico para escolher/anexar\n"
+              << "arquivos de configuracao da pasta config/.\n\n"
               << "Formato do arquivo:\n"
-              << "  algoritmo_escalonamento;quantum;qtde_cpus\n"
+              << "  algoritmo_escalonamento;quantum;qtde_cpus[;alpha]\n"
               << "  id;cor;ingresso;duracao;prioridade;lista_eventos\n\n"
               << "Escalonadores disponiveis: " << joinSchedulers() << "\n";
 }
 
 int main(int argc, char** argv) {
     // ---- Parse simples de argumentos (sem dependencias) ----
-    std::string configPath = "../config/config.txt";
-    std::string mode = "step";
-    bool noGui = false;
+    std::string configPath;                        // "" -> abre menu
+    std::string configDir  = "../config";
+    std::string mode       = "step";
+    bool noGui             = false;
+    bool forceMenu         = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -108,6 +115,10 @@ int main(int argc, char** argv) {
             return 0;
         } else if (arg.rfind("--config=", 0) == 0) {
             configPath = arg.substr(9);
+        } else if (arg.rfind("--config-dir=", 0) == 0) {
+            configDir = arg.substr(13);
+        } else if (arg == "--menu") {
+            forceMenu = true;
         } else if (arg.rfind("--mode=", 0) == 0) {
             mode = toLower(arg.substr(7));
         } else if (arg == "--no-gui") {
@@ -125,6 +136,23 @@ int main(int argc, char** argv) {
         std::cerr << "[ERRO] Modo invalido: " << mode << "\n";
         printUsage(argv[0]);
         return 1;
+    }
+
+    // ---- Menu de selecao (Projeto B: biblioteca de configs) ----
+    // Abre quando o usuario nao passou --config OU passou --menu explicitamente.
+    // O modo --no-gui sempre precisa de um path pela CLI (sem tela grafica).
+    if ((configPath.empty() || forceMenu) && !noGui) {
+        view::ConfigMenu menu(configDir);
+        std::string picked = menu.selectConfig();
+        if (picked.empty()) {
+            std::cerr << "[INFO] Nenhuma configuracao selecionada. Saindo.\n";
+            return 0;
+        }
+        configPath = picked;
+    } else if (configPath.empty() && noGui) {
+        // --no-gui sem --config: cai no default historico pra nao quebrar
+        // scripts antigos.
+        configPath = "../config/config.txt";
     }
 
     // ---- Leitura da configuracao ----

@@ -14,6 +14,11 @@ project(SimuladorEscalonamento LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Gera compile_commands.json em build/ para o IntelliSense do VSCode
+# entender flags, includes e o padrao C++ usado (evita falsos-positivos
+# tipo "std::filesystem nao existe").
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # ----------------------------------------------------------------------------
 # 1. Configuracoes globais ANTES do FetchContent
 # ----------------------------------------------------------------------------
