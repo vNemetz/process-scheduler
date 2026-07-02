@@ -61,6 +61,90 @@ int safeStoi(const std::string& s, int defaultValue) {
     }
 }
 
+// Parser de ID de tarefa. Aceita:
+//   "1", "01"       -> 1
+//   "t01", "T1"     -> 1
+//   "task-3"        -> 3
+// Estrategia: pula quaisquer nao-digitos iniciais e converte o primeiro
+// bloco numerico encontrado. Necessario porque os casos de teste do
+// professor usam IDs no formato tXX.
+int parseTaskId(const std::string& s) {
+    std::string digits;
+    for (char c : s) {
+        if (std::isdigit(static_cast<unsigned char>(c))) {
+            digits.push_back(c);
+        } else if (!digits.empty()) {
+            break;  // ja capturei digitos e agora veio nao-digito -> encerra
+        }
+    }
+    if (digits.empty()) return 0;
+    try { return std::stoi(digits); }
+    catch (...) { return 0; }
+}
+
+// Reconhece padroes de acoes concatenadas sem separador ';' (defensivo).
+// Casos de teste do professor tem entradas como "IO:01-02MU01:03" que
+// deveriam estar separadas por ponto-e-virgula. Aqui varremos a string
+// procurando os padroes conhecidos e devolvemos cada um como token separado.
+// Padroes reconhecidos:
+//   IO:<digitos>-<digitos>
+//   ML<digitos>:<digitos>
+//   MU<digitos>:<digitos>
+std::vector<std::string> splitConcatenatedEvents(const std::string& raw) {
+    std::vector<std::string> out;
+    if (raw.empty()) return out;
+
+    std::string upper = toUpper(raw);
+    const std::size_t n = raw.size();
+    std::size_t i = 0;
+
+    auto isDigit = [](char c) {
+        return std::isdigit(static_cast<unsigned char>(c)) != 0;
+    };
+
+    while (i < n) {
+        // Pula qualquer caractere que nao inicia um padrao (espacos, virgulas etc).
+        while (i < n && !isDigit(raw[i])
+                     && upper[i] != 'M' && upper[i] != 'I') { ++i; }
+        if (i >= n) break;
+
+        std::size_t start = i;
+
+        // IO:xx-yy
+        if (i + 2 < n && upper[i] == 'I' && upper[i+1] == 'O' && raw[i+2] == ':') {
+            i += 3;
+            std::size_t a = i;
+            while (i < n && isDigit(raw[i])) ++i;
+            if (a == i || i >= n || raw[i] != '-') { i = start + 1; continue; }
+            ++i;
+            std::size_t b = i;
+            while (i < n && isDigit(raw[i])) ++i;
+            if (b == i) { i = start + 1; continue; }
+            out.push_back(raw.substr(start, i - start));
+            continue;
+        }
+
+        // MLxx:tt ou MUxx:tt
+        if (i + 1 < n && upper[i] == 'M'
+            && (upper[i+1] == 'L' || upper[i+1] == 'U')) {
+            i += 2;
+            std::size_t a = i;
+            while (i < n && isDigit(raw[i])) ++i;
+            if (a == i || i >= n || raw[i] != ':') { i = start + 1; continue; }
+            ++i;
+            std::size_t b = i;
+            while (i < n && isDigit(raw[i])) ++i;
+            if (b == i) { i = start + 1; continue; }
+            out.push_back(raw.substr(start, i - start));
+            continue;
+        }
+
+        // Nao casou com nenhum padrao conhecido -> avanca um char.
+        ++i;
+    }
+    return out;
+}
+
 // Converte um evento cru (ex: "ML01:5", "MU2:8", "IO:3-4") em uma TaskAction.
 // Retorna false se o formato nao for reconhecido — nesse caso o evento fica
 // apenas em rawEvents e nao gera efeito na simulacao.
@@ -165,7 +249,7 @@ bool ConfigParser::parse(const std::string& filename,
         std::string token;
         Task t;
 
-        if (std::getline(ss, token, ';')) t.id = safeStoi(token, 0);
+        if (std::getline(ss, token, ';')) t.id = parseTaskId(trim(token));
         if (std::getline(ss, token, ';')) t.color = parseHexColor(token);
         if (std::getline(ss, token, ';')) t.arrivalTime = safeStoi(token, 0);
         if (std::getline(ss, token, ';')) t.totalDuration = safeStoi(token, 1);
@@ -178,17 +262,21 @@ bool ConfigParser::parse(const std::string& filename,
         t.dynamicPriority = t.staticPriority;
 
         // Lista de eventos: tudo o que vier depois da prioridade.
+        // Cada token entre ';' pode conter MAIS de uma acao concatenada
+        // (defesa contra casos de teste com typos, ex: "IO:01-02MU01:03").
+        // Por isso passamos por splitConcatenatedEvents antes de parsear.
         // Guardamos a string original (rawEvents) e tambem tentamos parsear
         // como TaskAction (Projeto B). Eventos com formato invalido ficam
         // apenas em rawEvents e nao geram efeito na simulacao.
         while (std::getline(ss, token, ';')) {
             std::string ev = trim(token);
             if (ev.empty()) continue;
-            std::string evUpper = toUpper(ev);
-            t.rawEvents.push_back(evUpper);
-            TaskAction action;
-            if (parseAction(ev, action)) {
-                t.actions.push_back(action);
+            for (const std::string& sub : splitConcatenatedEvents(ev)) {
+                t.rawEvents.push_back(toUpper(sub));
+                TaskAction action;
+                if (parseAction(sub, action)) {
+                    t.actions.push_back(action);
+                }
             }
         }
 

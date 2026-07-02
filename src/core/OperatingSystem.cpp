@@ -54,7 +54,10 @@ Task* OperatingSystem::findTaskById(int id) {
 
 // "Trabalha" 1 tick em cada tarefa que esta RUNNING.
 // Decrementa remainingTime, conta quantum, incrementa cpuTimeConsumed
-// (relogio local usado pelas acoes ML/MU/IO), e lida com termino/preempcao.
+// (relogio local usado pelas acoes ML/MU/IO), e lida com preempcao por
+// quantum. NAO marca TERMINATED aqui — isso e' feito em finalizeTerminated()
+// APOS processTaskActions(), para permitir que a ultima acao (p.ex. MU:dur)
+// da tarefa seja disparada antes da terminacao.
 void OperatingSystem::handleRunningTasks() {
     int now = clock.getTime();
 
@@ -67,20 +70,42 @@ void OperatingSystem::handleRunningTasks() {
         task->cpuTimeConsumed++;
         cpu.currentQuantumTime++;
 
-        if (task->remainingTime <= 0) {
-            // Tarefa terminou.
-            task->state = TaskState::TERMINATED;
-            task->finishTime = now + 1;   // Termina ao FIM deste tick.
-            task->cpuAssigned = -1;
-            cpu.currentTaskId = -1;
-            cpu.currentQuantumTime = 0;
-        } else if (cpu.currentQuantumTime >= quantum) {
+        if (task->remainingTime > 0 && cpu.currentQuantumTime >= quantum) {
             // Quantum esgotado: volta para a fila de prontos.
             task->state = TaskState::READY;
             task->cpuAssigned = -1;
             task->preemptions++;
             cpu.currentTaskId = -1;
             cpu.currentQuantumTime = 0;
+        }
+    }
+}
+
+// Marca como TERMINATED tarefas RUNNING que ja consumiram toda sua duracao.
+// Chamada APOS processTaskActions() para que a ultima acao (ex: MU no ultimo
+// tick de execucao) seja disparada antes. Ao terminar, libera quaisquer
+// mutexes que a tarefa ainda possua — evita deadlock por vazamento de mutex
+// quando o programador esquece o unlock antes do fim.
+void OperatingSystem::finalizeTerminated() {
+    int now = clock.getTime();
+    for (auto& t : tasks) {
+        if (t.state == TaskState::RUNNING && t.remainingTime <= 0) {
+            // Libera qualquer mutex de que ainda seja dona (defesa contra
+            // deadlock; um MU final que ficou para tras).
+            for (auto& kv : mutexes) {
+                if (kv.second.ownerTaskId == t.id) {
+                    grantMutexToNextWaiter(kv.second);
+                }
+            }
+
+            if (t.cpuAssigned >= 0
+                && t.cpuAssigned < static_cast<int>(cpus.size())) {
+                cpus[t.cpuAssigned].currentTaskId = -1;
+                cpus[t.cpuAssigned].currentQuantumTime = 0;
+            }
+            t.state = TaskState::TERMINATED;
+            t.finishTime = now + 1;
+            t.cpuAssigned = -1;
         }
     }
 }
@@ -290,6 +315,7 @@ bool OperatingSystem::executeOneTick() {
     processIOCompletions();    // Wakes de I/O antes de contabilizar work.
     handleRunningTasks();
     processTaskActions();      // Acoes com relativeTime que atingiu cpuTimeConsumed.
+    finalizeTerminated();      // Marca TERMINATED apos as acoes finais (ex: MU no ultimo tick).
     dispatch();
     processTaskActions();      // Acoes em relativeTime=0 de tarefas recem-dispachadas.
     applyAging();
@@ -308,7 +334,26 @@ bool OperatingSystem::isFinished() const {
 }
 
 bool OperatingSystem::execute() {
-    while (!isFinished()) executeOneTick();
+    const int MAX_TICKS = 5000;  // safety cap para evitar loop infinito
+    int guard = 0;
+    while (!isFinished()) {
+        executeOneTick();
+        if (++guard > MAX_TICKS) {
+            std::cerr << "[OS] Limite de " << MAX_TICKS
+                      << " ticks atingido — abortando simulacao.\n";
+            for (const auto& t : tasks) {
+                if (t.state != TaskState::TERMINATED) {
+                    std::cerr << "  T" << t.id
+                              << " state=" << toString(t.state)
+                              << " remaining=" << t.remainingTime
+                              << " cpuTimeConsumed=" << t.cpuTimeConsumed
+                              << " nextAction=" << t.nextActionIndex
+                              << "/" << t.actions.size() << "\n";
+                }
+            }
+            return false;
+        }
+    }
     return true;
 }
 

@@ -99,6 +99,7 @@ private:
     void saveSnapshot();
     void admitArrivals();
     void handleRunningTasks();
+    void finalizeTerminated();
     void accumulateWaitMetrics();
     void dispatch();
     void processIOCompletions();
