@@ -5,8 +5,8 @@
 namespace sim {
 
 // Escalonador preemptivo por prioridades com envelhecimento
-// (Projeto B — req 1). Decisao baseada em dynamicPriority (mantida
-// pelo OperatingSystem, que soma alpha por tick para tarefas READY
+//Decisao baseada em dynamicPriority (mantida pelo OperatingSystem,
+// que soma alpha por tick para tarefas READY
 // e reseta para staticPriority quando a tarefa esta RUNNING).
 //
 // O criterio principal e' o valor de dynamicPriority (maior vence).
