@@ -280,7 +280,7 @@ void OperatingSystem::processTaskActions() {
     }
 }
 
-// Envelhecimento (Projeto B, req 1): tarefas READY ganham alpha por tick;
+// Envelhecimento: tarefas READY ganham alpha por tick;
 // tarefas RUNNING tem sua prioridade dinamica resetada para a estatica.
 // Sem efeito quando alpha == 0 (ou seja, todos os cenarios que nao usam
 // PRIOPEnv).

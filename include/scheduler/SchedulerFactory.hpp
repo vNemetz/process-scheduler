@@ -11,16 +11,12 @@ namespace sim {
 
 // Factory baseada em registry para criar instancias de IScheduler.
 //
-// Por que? O enunciado (req 4.2) pede que novos algoritmos possam ser
-// adicionados sem editar o codigo da simulacao. A solucao convencional
-// (if/else dentro do construtor do OperatingSystem) viola esse principio.
-//
 // Aqui um scheduler so precisa:
 //   1. Implementar IScheduler.
 //   2. Chamar SchedulerFactory::registerScheduler("NOME", []{...}) em
 //      escopo global (variavel auto-registradora).
 //
-// O registry e' um singleton "Meyer's" (funcao com static local) para
+// O registry e' um singleton (funcao com static local) para
 // evitar problemas de ordem de inicializacao de variaveis globais.
 class SchedulerFactory {
 public:
