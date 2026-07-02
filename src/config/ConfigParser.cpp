@@ -1,5 +1,6 @@
 #include "config/ConfigParser.hpp"
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <algorithm>
 #include <cctype>
@@ -278,6 +279,28 @@ bool ConfigParser::parse(const std::string& filename,
                     t.actions.push_back(action);
                 }
             }
+        }
+
+        // Ordena acoes por relativeTime crescente. O simulador so dispara
+        // enquanto a proxima acao tem rel == cpuTimeConsumed atual e o
+        // cpuTime so cresce — entao qualquer acao "para tras" seria
+        // silenciosamente ignorada. Usa stable_sort para preservar a ordem
+        // do arquivo em acoes com o mesmo instante (req 2.5).
+        bool outOfOrder = false;
+        for (std::size_t i = 1; i < t.actions.size(); ++i) {
+            if (t.actions[i].relativeTime < t.actions[i-1].relativeTime) {
+                outOfOrder = true;
+                break;
+            }
+        }
+        if (outOfOrder) {
+            std::cerr << "[WARN] Tarefa " << t.id
+                      << ": acoes fora de ordem cronologica no arquivo. "
+                      << "Reordenando por rel_time para evitar acoes ignoradas.\n";
+            std::stable_sort(t.actions.begin(), t.actions.end(),
+                             [](const TaskAction& a, const TaskAction& b) {
+                                 return a.relativeTime < b.relativeTime;
+                             });
         }
 
         outTasks.push_back(std::move(t));
