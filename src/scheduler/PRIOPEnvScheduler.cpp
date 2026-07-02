@@ -1,44 +1,46 @@
-#include "scheduler/PRIOpScheduler.hpp"
+#include "scheduler/PRIOPEnvScheduler.hpp"
 #include "scheduler/SchedulerFactory.hpp"
 
 #include <cstdlib>
 
 namespace sim {
 
-// Auto-registro no factory. Ver SRTFScheduler.cpp para a justificativa.
 namespace {
-    const bool priopRegistered = SchedulerFactory::registerScheduler(
-        "PRIOP", []{ return std::unique_ptr<IScheduler>(new PRIOpScheduler()); });
+    // Auto-registro no factory (mesmo padrao dos outros escalonadores).
+    const bool priopEnvRegistered = SchedulerFactory::registerScheduler(
+        "PRIOPENV", []{ return std::unique_ptr<IScheduler>(new PRIOPEnvScheduler()); });
 }
 
-// Compara duas tarefas pelos criterios PRIOp (req 4.4).
 // Retorna <0 se 'a' vence, >0 se 'b' vence, 0 se empate real (sorteio).
-static int comparePRIOp(Task* a, Task* b, Task* running) {
-    // Criterio primario PRIOp (req 4.4): maior prioridade estatica vence.
+// Criterios (req 1.3 do Projeto B):
+//   principal : dynamicPriority maior vence
+//   desempate 1: staticPriority maior vence
+//   desempate 2: tarefa que estava rodando ganha (evita context switch)
+//   desempate 3: menor arrival_time
+//   desempate 4: menor duracao total
+//   desempate 5: sorteio
+static int comparePRIOPEnv(Task* a, Task* b, Task* running) {
+    if (a->dynamicPriority != b->dynamicPriority)
+        return b->dynamicPriority - a->dynamicPriority;
+
     if (a->staticPriority != b->staticPriority)
         return b->staticPriority - a->staticPriority;
 
-    // A partir daqui, aplicam-se os mesmos 4 criterios da req 4.3.
-
-    // (1) Continuidade da tarefa em execucao.
     if (a == running && b != running) return -1;
     if (b == running && a != running) return  1;
 
-    // (2) Menor arrival_time.
     if (a->arrivalTime != b->arrivalTime)
         return a->arrivalTime - b->arrivalTime;
 
-    // (3) Menor duracao total.
     if (a->totalDuration != b->totalDuration)
         return a->totalDuration - b->totalDuration;
 
-    // (4) Empate real -> sorteio.
     return 0;
 }
 
-Task* PRIOpScheduler::selectNextTask(std::vector<Task*>& readyQueue,
-                                     Task* currentlyRunning,
-                                     int /*currentTick*/)
+Task* PRIOPEnvScheduler::selectNextTask(std::vector<Task*>& readyQueue,
+                                        Task* currentlyRunning,
+                                        int /*currentTick*/)
 {
     std::vector<Task*> candidates = readyQueue;
     if (currentlyRunning != nullptr) candidates.push_back(currentlyRunning);
@@ -48,7 +50,7 @@ Task* PRIOpScheduler::selectNextTask(std::vector<Task*>& readyQueue,
     best.push_back(candidates[0]);
 
     for (size_t i = 1; i < candidates.size(); ++i) {
-        int cmp = comparePRIOp(candidates[i], best[0], currentlyRunning);
+        int cmp = comparePRIOPEnv(candidates[i], best[0], currentlyRunning);
         if (cmp < 0) {
             best.clear();
             best.push_back(candidates[i]);
@@ -67,11 +69,6 @@ Task* PRIOpScheduler::selectNextTask(std::vector<Task*>& readyQueue,
     }
 
     return selected;
-}
-
-// Mantido por compatibilidade do header. Versao bool de comparePRIOp.
-bool PRIOpScheduler::beats(Task* a, Task* b, Task* running) {
-    return comparePRIOp(a, b, running) < 0;
 }
 
 }  // namespace sim
